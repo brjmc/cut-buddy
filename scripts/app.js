@@ -5,6 +5,7 @@
   const scoreEl = document.getElementById("confidenceScore");
   const presetButtons = document.querySelectorAll(".pill[data-confidence]");
   const recordingStatus = document.getElementById("recordingStatus");
+  const speechSupport = document.getElementById("speechSupport");
   const toggleListeningButton = document.getElementById("toggleListening");
   const clearCutsButton = document.getElementById("clearCuts");
   const phraseInput = document.getElementById("phraseInput");
@@ -13,7 +14,7 @@
   const cutsList = document.getElementById("cutsList");
   const cutsCount = document.getElementById("cutsCount");
 
-  if (!screen || !slider || !labelEl || !scoreEl || !cutsList || !cutsCount) {
+  if (!screen || !slider || !labelEl || !scoreEl || !cutsList || !cutsCount || !liveTranscript) {
     return;
   }
 
@@ -74,9 +75,12 @@
 
   const FEET_UNITS = new Set(["foot", "feet", "ft"]);
   const INCH_UNITS = new Set(["inch", "inches", "in"]);
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
   const cuts = [];
   let isListening = false;
+  let shouldListen = false;
+  let recognition = null;
 
   const clampConfidence = (value) => {
     if (Number.isNaN(value)) return 0;
@@ -101,17 +105,23 @@
     screen.setAttribute("aria-label", `${state.label} at ${percent} percent confidence`);
   };
 
-  const updateRecordingUI = () => {
-    if (!recordingStatus || !toggleListeningButton) {
-      return;
-    }
+  const setSupportText = (text, isError = false) => {
+    if (!speechSupport) return;
+    speechSupport.textContent = text;
+    speechSupport.classList.toggle("is-error", isError);
+  };
 
-    recordingStatus.textContent = isListening ? "Recorder live" : "Recorder idle";
-    toggleListeningButton.textContent = isListening ? "Stop recording" : "Start recording";
-    toggleListeningButton.classList.toggle("is-live", isListening);
-    liveTranscript.textContent = isListening
-      ? "Listening for length phrases..."
-      : "Waiting for speech...";
+  const updateRecordingUI = () => {
+    if (!recordingStatus || !toggleListeningButton) return;
+
+    const active = shouldListen || isListening;
+    recordingStatus.textContent = active ? "Recorder live" : "Recorder idle";
+    toggleListeningButton.textContent = active ? "Stop recording" : "Start recording";
+    toggleListeningButton.classList.toggle("is-live", active);
+
+    if (!active && !liveTranscript.textContent.trim()) {
+      liveTranscript.textContent = "Waiting for speech...";
+    }
   };
 
   const tokenize = (text) => {
@@ -128,7 +138,6 @@
   const readAmount = (tokens, start) => {
     let index = start;
     let hasNumberContent = false;
-    let total = 0;
     let current = 0;
 
     while (index < tokens.length) {
@@ -189,20 +198,16 @@
       return null;
     }
 
-    total += current;
-    return { value: total, nextIndex: index };
+    return { value: current, nextIndex: index };
   };
 
   const parseMeasurement = (phrase) => {
     const tokens = tokenize(phrase);
-    if (tokens.length === 0) {
-      return null;
-    }
+    if (tokens.length === 0) return null;
 
     let feet = 0;
     let inches = 0;
     let cursor = 0;
-    let sawUnit = false;
 
     while (cursor < tokens.length) {
       const amount = readAmount(tokens, cursor);
@@ -216,29 +221,21 @@
 
       if (unitToken && FEET_UNITS.has(unitToken)) {
         feet += amount.value;
-        sawUnit = true;
         cursor += 1;
         continue;
       }
 
       if (unitToken && INCH_UNITS.has(unitToken)) {
         inches += amount.value;
-        sawUnit = true;
         cursor += 1;
         continue;
       }
 
-      if (sawUnit && feet > 0 && inches === 0) {
-        inches += amount.value;
-      } else {
-        inches += amount.value;
-      }
+      inches += amount.value;
     }
 
     const totalInches = feet * 12 + inches;
-    if (totalInches <= 0) {
-      return null;
-    }
+    if (totalInches <= 0) return null;
 
     return {
       raw: phrase.trim(),
@@ -256,20 +253,12 @@
       item.textContent = `${index + 1}. ${cut.raw} -> ${cut.display}`;
       cutsList.appendChild(item);
     });
-
     cutsCount.textContent = `${cuts.length} ${cuts.length === 1 ? "item" : "items"}`;
   };
 
-
-  const addCutFromPhrase = () => {
-    if (!phraseInput) {
-      return;
-    }
-
-    const phrase = phraseInput.value.trim();
-    if (!phrase) {
-      return;
-    }
+  const addCutFromPhrase = (sourceText = "") => {
+    const phrase = sourceText.trim() || (phraseInput ? phraseInput.value.trim() : "");
+    if (!phrase) return;
 
     const measurement = parseMeasurement(phrase);
     liveTranscript.textContent = phrase;
@@ -282,11 +271,114 @@
 
     cuts.push(measurement);
     renderCuts();
+  };
 
-    const confidence = clampConfidence(Number.parseFloat(slider.value) || 0);
-    if (confidence < 0.45) {
-      applyConfidence(0.55);
+  const mapSpeechError = (errorCode) => {
+    if (errorCode === "not-allowed") return "Microphone permission denied.";
+    if (errorCode === "audio-capture") return "No microphone input detected.";
+    if (errorCode === "network") return "Speech service network issue.";
+    if (errorCode === "no-speech") return "No speech detected.";
+    if (errorCode === "aborted") return "Recognition stopped.";
+    return "Speech recognition error.";
+  };
+
+  const stopListening = () => {
+    shouldListen = false;
+    if (recognition && isListening) {
+      recognition.stop();
     }
+    isListening = false;
+    updateRecordingUI();
+  };
+
+  const startListening = () => {
+    if (!recognition) {
+      setSupportText("SpeechRecognition is not supported in this browser.", true);
+      return;
+    }
+
+    shouldListen = true;
+    liveTranscript.textContent = "Listening for length phrases...";
+
+    try {
+      recognition.start();
+    } catch (_error) {
+      // Some engines throw if start is called while already active.
+    }
+    updateRecordingUI();
+  };
+
+  const setupRecognition = () => {
+    if (!SpeechRecognition) {
+      setSupportText("SpeechRecognition is not supported in this browser.", true);
+      return;
+    }
+
+    recognition = new SpeechRecognition();
+    recognition.lang = "en-US";
+    recognition.interimResults = true;
+    recognition.continuous = true;
+    recognition.maxAlternatives = 1;
+
+    setSupportText("Speech recognition ready. Tap Start recording and grant mic permission.");
+
+    recognition.onstart = () => {
+      isListening = true;
+      updateRecordingUI();
+    };
+
+    recognition.onresult = (event) => {
+      let interimText = "";
+
+      for (let i = event.resultIndex; i < event.results.length; i += 1) {
+        const result = event.results[i];
+        const best = result[0];
+        if (!best) continue;
+
+        const confidence = clampConfidence(best.confidence);
+        if (confidence > 0) {
+          applyConfidence(confidence);
+        }
+
+        if (result.isFinal) {
+          const finalText = best.transcript.trim();
+          if (finalText) {
+            liveTranscript.textContent = finalText;
+            addCutFromPhrase(finalText);
+          }
+        } else {
+          interimText += `${best.transcript} `;
+        }
+      }
+
+      const compactInterim = interimText.trim();
+      if (compactInterim) {
+        liveTranscript.textContent = compactInterim;
+      }
+    };
+
+    recognition.onerror = (event) => {
+      const errorMessage = mapSpeechError(event.error);
+      setSupportText(errorMessage, true);
+      liveTranscript.textContent = errorMessage;
+
+      if (event.error === "not-allowed" || event.error === "audio-capture") {
+        shouldListen = false;
+      }
+    };
+
+    recognition.onend = () => {
+      isListening = false;
+      if (shouldListen) {
+        try {
+          recognition.start();
+          return;
+        } catch (_error) {
+          // If immediate restart fails, UI will remain idle until next user action.
+        }
+      }
+      updateRecordingUI();
+    };
   };
 
   slider.addEventListener("input", (event) => {
@@ -302,8 +394,11 @@
 
   if (toggleListeningButton) {
     toggleListeningButton.addEventListener("click", () => {
-      isListening = !isListening;
-      updateRecordingUI();
+      if (shouldListen || isListening) {
+        stopListening();
+      } else {
+        startListening();
+      }
     });
   }
 
@@ -316,7 +411,9 @@
   }
 
   if (addPhraseButton) {
-    addPhraseButton.addEventListener("click", addCutFromPhrase);
+    addPhraseButton.addEventListener("click", () => {
+      addCutFromPhrase();
+    });
   }
 
   if (phraseInput) {
@@ -328,6 +425,7 @@
     });
   }
 
+  setupRecognition();
   updateRecordingUI();
   renderCuts();
   applyConfidence(Number.parseFloat(slider.value));

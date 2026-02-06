@@ -145,6 +145,16 @@ body {
   align-items: baseline;
 }
 
+.support-note {
+  margin: 0;
+  font-size: 0.86rem;
+  color: #5d7084;
+}
+
+.support-note.is-error {
+  color: #9c2f39;
+}
+
 .slider-label {
   font-size: 0.9rem;
   color: #4a5969;
