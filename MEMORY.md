@@ -3,47 +3,37 @@
 ## Session Summary - 2026-02-07
 
 ### Major Deliverables
-- Created initial delivery roadmap in `plan.md` based on `README.md`, `SPEC.md`, and implemented code.
-- Implemented substantial product build-out from prototype:
-  - Voice capture pipeline with confidence visualization.
-  - Cut list parsing and management.
-  - Stock configuration + kerf support.
-  - Client-side Best Fit Decreasing optimization output.
-  - PWA shell artifacts (`manifest.webmanifest`, `sw.js`).
-- Reworked UI into a two-view architecture:
-  - `Record` view for focused capture.
-  - `Plan` view for configuration and optimization review.
-- Added unit selection (inches/feet/cm/mm) with unit-aware display/parsing behavior.
-
-### Key Bug Fixes
-- Fixed fraction tokenization/parsing bug where slash fractions (e.g., `1/8`) were misread and summed incorrectly.
-- Preserved spoken phrase in displayed cut entries and TTS read-back.
-- Improved fraction precision handling (for example, `3/16 = 0.1875`), avoiding premature rounding.
-- Added mixed-fraction rendering in user-facing measurement displays.
-
-### Documentation Changes
-- Updated `README.md` from stale template to current project state.
-- Added/updated UI direction doc: `UI_DESIGN.md`.
-- Cleaned and rewrote `plan.md` to reflect current implementation state and next work.
-- Updated `SPEC.md` with a current implementation snapshot and removed stale artifact text.
-
-### User-Requested Backlog Captured
-Persisted in `plan.md` under `Future Change List` and executed in this session:
-1. Recording flow now enters on explicit record action and exits on stop action.
-2. Manual entry widget removed (reintroduction deferred to redesigned correction UX).
-3. Visible Record/Plan mode buttons removed from header UI.
-4. Metric-specific default stock presets added when metric units are selected.
-
-Still pending from backlog intent:
-1. Fraction phrase safety hardening for denominator-word formats (for example, `12 13/64ths`) must fail safely.
+- Hardened measurement parsing with safe-fail behavior for unsupported denominator-word fraction phrases.
+- Extracted shared parser/optimizer core into `scripts/engine.js`.
+- Added regression coverage via `scripts/regression-tests.js`.
+- Added workflow wiring precheck via `scripts/workflow-precheck.js`.
+- Added mobile validation tracking doc: `MOBILE_VALIDATION_REPORT.md`.
+- Implemented replacement manual correction interaction in record mode:
+  - parse failure opens correction panel,
+  - corrected phrase can be applied inline without leaving recording flow.
+- Completed UI Sketch implementation plan steps 1-7 in `plan.md`:
+  - plan DOM restructured to top config/cuts + lower results section,
+  - controls simplified and de-emphasized for sketch parity,
+  - recording view reprioritized around latest accepted cut + grouped counts,
+  - record exit now auto-scrolls to results with reduced-motion fallback,
+  - responsive spacing/tap targets tuned,
+  - focus behavior added for record enter/exit.
+- Manual validation was completed by user and reflected as complete in plan tracking.
 
 ### Current Product Reality
-- App functionality has moved far beyond original barebones template.
-- UI now supports quick capture and planning workflows without surfacing mode toggles.
-- Recording interaction now follows explicit user intent (`Record cuts` -> `Stop recording`) in full-screen capture mode.
-- Parser still needs explicit hardening for denominator-word fraction phrases (for example, `64ths`).
+- Parser now rejects unsupported formats (for example denominator-word variants like `13/64ths`) instead of producing bogus values.
+- Parse failures provide explicit feedback and preserve stable latest accepted cut display.
+- Record view is immersive and prioritizes capture-centric information hierarchy.
+- Exiting recording returns to plan and jumps user to results context.
+- Core parser/optimizer behavior is testable outside the browser.
 
-### Practical Next Steps
-1. Implement parser safe-fail behavior for denominator-word and unsupported fraction formats.
-2. Add parser/optimizer regression tests and run mobile Safari validation.
-3. Design and implement a dedicated correction UX to replace manual entry.
+### Source of Truth Files
+- Plan/status: `plan.md`
+- Validation status and checklist: `MOBILE_VALIDATION_REPORT.md`
+- Parser/optimizer core: `scripts/engine.js`
+- Regression tests: `scripts/regression-tests.js`
+- Workflow guard checks: `scripts/workflow-precheck.js`
+
+### Follow-up Opportunities
+1. Add a compact `jump to config` affordance when deep in results (already noted in `plan.md`).
+2. Expand parser regression set with more speech-transcript edge cases from field usage.

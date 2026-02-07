@@ -23,18 +23,33 @@
       <main class="app-layout">
         <section id="recordView" class="mode-view record-view" aria-label="Recording view" hidden>
           <div id="recordCanvas" class="record-canvas" role="status" aria-live="polite">
-            <p id="recordUnitBadge" class="record-unit">inches</p>
+            <div class="record-top">
+              <p id="recordUnitBadge" class="record-unit">inches</p>
+              <div class="record-confidence-mini">
+                <p class="record-confidence-label" id="confidenceLabel">Waiting for voice input</p>
+                <p class="record-confidence-score" id="confidenceScore">--%</p>
+              </div>
+            </div>
 
             <div class="record-center">
-              <p class="record-confidence-label" id="confidenceLabel">Waiting for voice input</p>
-              <p class="record-confidence-score" id="confidenceScore">--%</p>
               <p class="record-latest" id="recordLatestAccepted">Waiting for a cut...</p>
+              <ul id="recordGroupedList" class="record-grouped-list"></ul>
             </div>
 
             <div class="record-stack">
-              <ul id="recordGroupedList" class="record-grouped-list"></ul>
               <p class="support-note" id="speechSupport">Checking speech recognition support...</p>
             </div>
+
+            <section id="correctionPanel" class="correction-panel" aria-live="polite" hidden>
+              <p class="correction-title">Correction needed</p>
+              <p id="correctionPrompt" class="correction-prompt"></p>
+              <label class="form-label correction-label" for="correctionInput">Fix phrase</label>
+              <input id="correctionInput" type="text" autocomplete="off" />
+              <div class="correction-actions">
+                <button id="applyCorrection" class="action-button" type="button">Add corrected cut</button>
+                <button id="dismissCorrection" class="ghost-button" type="button">Dismiss</button>
+              </div>
+            </section>
 
             <div class="record-actions">
               <button id="recordToggleListening" class="record-button" type="button">Start recording</button>
@@ -43,10 +58,10 @@
         </section>
 
         <section id="planView" class="mode-view plan-view" aria-label="Planning view">
-          <section class="plan-top-grid">
-            <article class="card">
+          <section class="plan-flow" aria-label="Planning workspace">
+            <article class="card config-card">
               <div class="card-headline">
-                <h3>Plan Controls</h3>
+                <h3>Config / Plan</h3>
                 <span id="recordingStatus">Recorder idle</span>
               </div>
 
@@ -58,39 +73,53 @@
                 <option value="mm">Millimeters</option>
               </select>
 
+              <label class="form-label" for="stockInput">Stock lengths (comma-separated)</label>
+              <input id="stockInput" type="text" value="8 ft, 12 ft, 16 ft" autocomplete="off" />
+
+              <div id="stockPills" class="stock-pill-row" aria-live="polite"></div>
+
+              <label class="form-label" for="kerfInput">Blade kerf</label>
+              <input id="kerfInput" type="number" min="0" step="0.01" value="0.125" />
+
               <div class="capture-controls">
-                <button class="action-button" id="goRecordFromPlan" type="button">Record cuts</button>
+                <button class="action-button" id="goRecordFromPlan" type="button">record</button>
+                <button class="ghost-button" id="saveState" type="button">Save local</button>
+              </div>
+              <p class="support-note"><span id="stockPreviewLabel">0 options</span> ready.</p>
+              <p class="support-note" id="stockStatus">Ready to optimize.</p>
+            </article>
+
+            <article class="card">
+              <div class="card-headline">
+                <h3>Captured Cuts</h3>
+                <span id="cutsCount">0 items</span>
+              </div>
+
+              <div class="capture-controls">
                 <button class="ghost-button" id="undoLastCut" type="button">Undo last</button>
                 <button class="ghost-button" id="clearCuts" type="button">Clear cuts</button>
               </div>
-
-              <label class="slider-label" for="confidenceRange">Manual confidence override</label>
-              <input
-                id="confidenceRange"
-                type="range"
-                min="0"
-                max="1"
-                step="0.01"
-                value="0.62"
-                aria-valuemin="0"
-                aria-valuemax="1"
-                aria-valuenow="0.62"
-              />
-
-              <div class="pill-row" role="group" aria-label="Jump to confidence states">
-                <button class="pill" data-confidence="0.9" type="button">High</button>
-                <button class="pill" data-confidence="0.55" type="button">Medium</button>
-                <button class="pill" data-confidence="0.25" type="button">Low</button>
-              </div>
               <p class="support-note" id="liveTranscript">Waiting for speech...</p>
-            </article>
-          </section>
 
-          <section class="workspace-grid" aria-label="Planning workspace">
-            <article class="card">
-              <div class="card-headline">
-                <h3>Input Intelligence</h3>
-                <span id="cutsCount">0 items</span>
+              <div class="confidence-tools">
+                <label class="slider-label" for="confidenceRange">Manual confidence override</label>
+                <input
+                  id="confidenceRange"
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.01"
+                  value="0.62"
+                  aria-valuemin="0"
+                  aria-valuemax="1"
+                  aria-valuenow="0.62"
+                />
+
+                <div class="pill-row" role="group" aria-label="Jump to confidence states">
+                  <button class="pill" data-confidence="0.9" type="button">High</button>
+                  <button class="pill" data-confidence="0.55" type="button">Medium</button>
+                  <button class="pill" data-confidence="0.25" type="button">Low</button>
+                </div>
               </div>
 
               <div class="stat-grid" aria-label="Cut statistics">
@@ -110,31 +139,15 @@
 
               <ul id="cutsList" class="cut-items"></ul>
             </article>
+          </section>
 
-            <article class="card">
-              <div class="card-headline">
-                <h3>Stock Configuration</h3>
-                <span id="stockPreviewLabel">0 options</span>
-              </div>
-
-              <label class="form-label" for="stockInput">Stock lengths (comma-separated)</label>
-              <input id="stockInput" type="text" value="8 ft, 12 ft, 16 ft" autocomplete="off" />
-
-              <div id="stockPills" class="stock-pill-row" aria-live="polite"></div>
-
-              <label class="form-label" for="kerfInput">Blade kerf</label>
-              <input id="kerfInput" type="number" min="0" step="0.01" value="0.125" />
-
-              <div class="capture-controls">
-                <button class="action-button" id="calculatePlan" type="button">Calculate plan</button>
-                <button class="ghost-button" id="saveState" type="button">Save local</button>
-              </div>
-              <p class="support-note" id="stockStatus">Ready to optimize.</p>
-            </article>
-
+          <section id="resultsSection" class="results-section" aria-label="Optimization results">
+            <div class="capture-controls">
+              <button class="action-button" id="calculatePlan" type="button">Calculate plan</button>
+            </div>
             <article class="card results-card">
               <div class="card-headline">
-                <h3>Optimization Results</h3>
+                <h3 id="resultsHeading" tabindex="-1">Optimization Results</h3>
                 <span id="solverTag">Not run</span>
               </div>
 
@@ -165,6 +178,7 @@
       </main>
     </div>
 
+    <script src="scripts/engine.js"></script>
     <script src="scripts/app.js"></script>
   </body>
 </html>

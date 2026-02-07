@@ -31,10 +31,10 @@ Implemented and active in the app:
 - Run cross-device validation (iOS Safari priority).
 
 ## Immediate Next Implementation Batch
-1. Harden parser handling for denominator-word and unsupported fraction phrases (safe-fail behavior).
-2. Add parser/optimizer regression tests for high-risk measurement inputs.
-3. Validate full recording/plan workflow on iOS Safari and mobile Chrome.
-4. Design and implement a replacement manual correction interaction pattern.
+1. [x] Harden parser handling for denominator-word and unsupported fraction phrases (safe-fail behavior).
+2. [x] Add parser/optimizer regression tests for high-risk measurement inputs.
+3. [x] Validate full recording/plan workflow on iOS Safari and mobile Chrome. (manual validation complete; see `MOBILE_VALIDATION_REPORT.md`)
+4. [x] Design and implement a replacement manual correction interaction pattern.
 
 ## UI Sketch Implementation Plan (February 7, 2026)
 Target: align app flow to attached sketch with:
@@ -56,7 +56,7 @@ Target: align app flow to attached sketch with:
 - Returning from record mode currently just toggles view; no targeted scroll behavior exists.
 
 ### Implementation Plan
-1. Restructure Plan DOM to match sketch hierarchy
+1. [x] Restructure Plan DOM to match sketch hierarchy
 - Introduce a top “Config/Plan” card containing:
   - title,
   - unit selector,
@@ -66,14 +66,14 @@ Target: align app flow to attached sketch with:
 - Move optimization output into a lower “Results” section that naturally sits below fold on mobile.
 - Keep `Calculate plan` anchored near results section per sketch.
 
-2. Simplify controls for sketch parity
+2. [x] Simplify controls for sketch parity
 - Remove/de-emphasize confidence slider/pills from plan surface (keep internals if needed, hide from primary UX).
 - Preserve existing edit/undo/clear operations, but move secondary actions out of primary visual path.
 - Rename CTA labels to sketch language:
   - `Record cuts` -> `record`
   - `Stop recording` stays primary in record mode.
 
-3. Adjust recording view content and visual priority
+3. [x] Adjust recording view content and visual priority
 - Keep immersive recording screen behavior.
 - Reorder record content blocks:
   - unit label top,
@@ -82,7 +82,7 @@ Target: align app flow to attached sketch with:
   - bottom sticky `stop recording` button.
 - Ensure parse failures show explicit “could not parse” feedback without replacing stable grouped summary.
 
-4. Implement “return + auto-scroll to results” flow
+4. [x] Implement “return + auto-scroll to results” flow
 - Add a stable anchor id for results section (example: `#resultsSection`).
 - On transition `record -> plan`:
   - complete mode switch,
@@ -90,21 +90,21 @@ Target: align app flow to attached sketch with:
   - call `scrollIntoView({ behavior: "smooth", block: "start" })` on results section.
 - Gate auto-scroll to only run on exits from recording (not all mode changes).
 
-5. Responsive behavior and spacing
+5. [x] Responsive behavior and spacing
 - Mobile-first stack should mirror sketch:
   - config card first,
   - results section below.
 - Desktop keeps readable widths but preserves vertical workflow order.
 - Verify button sizing and spacing for field use tap targets.
 
-6. Accessibility and interaction checks
+6. [x] Accessibility and interaction checks
 - Keep clear ARIA labels for recording region and result area.
 - Ensure focus moves predictably after mode switch:
   - on enter record: focus stop/start button,
   - on exit record: focus results heading (after scroll) for screen-reader continuity.
 - Respect reduced-motion preference for smooth scroll fallback.
 
-7. Validation checklist
+7. [x] Validation checklist (manual validation complete)
 - Start in plan mode, tap `record`, confirm immersive record view.
 - Accept several spoken cuts, verify central latest value + grouped list updates.
 - Tap `stop recording`, verify:
