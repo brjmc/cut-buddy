@@ -140,6 +140,7 @@
 
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   const SpeechSynthesis = window.speechSynthesis;
+  const isChromeOniOS = /\bCriOS\b/i.test(navigator.userAgent || "");
 
   const state = {
     mode: "plan",
@@ -147,6 +148,7 @@
     cuts: [],
     isListening: false,
     shouldListen: false,
+    hasPrimedMicPermission: false,
     recognition: null,
     kerf: 0.125,
     stockLengths: [...DEFAULT_STOCK_PRESETS.inches],
@@ -1035,6 +1037,24 @@
     return "Speech recognition error.";
   };
 
+  const primeMicrophonePermission = async () => {
+    if (state.hasPrimedMicPermission) return true;
+    if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== "function") {
+      return true;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach((track) => track.stop());
+      state.hasPrimedMicPermission = true;
+      return true;
+    } catch (_error) {
+      setSupportText("Microphone access blocked. Enable mic permission for this site and try again.", true);
+      liveTranscript.textContent = "Microphone access blocked.";
+      return false;
+    }
+  };
+
   const stopListening = () => {
     state.shouldListen = false;
     if (state.recognition && state.isListening) {
@@ -1044,9 +1064,21 @@
     updateRecordingUI();
   };
 
-  const startListening = () => {
+  const startListening = async () => {
     if (!state.recognition) {
-      setSupportText("SpeechRecognition is not supported in this browser.", true);
+      if (isChromeOniOS) {
+        setSupportText("Speech recognition is unavailable in Chrome on iOS. Use Safari on iPhone/iPad.", true);
+      } else {
+        setSupportText("SpeechRecognition is not supported in this browser.", true);
+      }
+      return;
+    }
+
+    const micReady = await primeMicrophonePermission();
+    if (!micReady) {
+      state.shouldListen = false;
+      state.isListening = false;
+      updateRecordingUI();
       return;
     }
 
@@ -1055,7 +1087,13 @@
 
     try {
       state.recognition.start();
-    } catch (_error) {
+    } catch (error) {
+      if (error && typeof error === "object" && "name" in error && error.name === "NotAllowedError") {
+        const message = mapSpeechError("not-allowed");
+        setSupportText(message, true);
+        liveTranscript.textContent = message;
+        state.shouldListen = false;
+      }
       // Engine may throw if already active.
     }
 
@@ -1064,7 +1102,11 @@
 
   const setupRecognition = () => {
     if (!SpeechRecognition) {
-      setSupportText("SpeechRecognition is not supported in this browser.", true);
+      if (isChromeOniOS) {
+        setSupportText("Speech recognition is unavailable in Chrome on iOS. Use Safari on iPhone/iPad.", true);
+      } else {
+        setSupportText("SpeechRecognition is not supported in this browser.", true);
+      }
       return;
     }
 
@@ -1291,7 +1333,7 @@
 
   const enterRecordMode = () => {
     setMode("record");
-    startListening();
+    void startListening();
     recordToggleListeningButton.focus();
   };
 
