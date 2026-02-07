@@ -1,5 +1,10 @@
 # Voice-Driven 1D Bin Packing Web App Spec
 
+## Current Implementation Snapshot (February 7, 2026)
+- Core speech capture, cut parsing, and optimization are implemented client-side.
+- PWA shell is present (`manifest.webmanifest`, `sw.js`).
+- Ongoing work focuses on parser hardening, recording-flow refinements, and metric preset behavior (tracked in `plan.md`).
+
 ## Problem Statement
 Build a web app that solves the 1D bin packing (cut list optimization) problem using voice input. Users speak cut lengths from fabrication plans, and the app calculates the most efficient way to purchase stock material.
 
@@ -86,5 +91,3 @@ Build a web app that solves the 1D bin packing (cut list optimization) problem u
 - Account for blade kerf (material lost per cut).
 - Export cutting diagrams as PDF.
 - Voice commands for "undo", "clear list", "calculate".
-
-> Sonnet 4.5Claude is AI and can make mistakes. Please double-check responses.

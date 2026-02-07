@@ -1,18 +1,28 @@
-# Cut Buddy Template
+# Cut Buddy
 
-This is a barebones static web template: HTML, CSS, and JavaScript files with no frameworks or build tooling. Use it as a blank canvas for future iterations.
-For the full product direction, see [`SPEC.md`](./SPEC.md); keep it updated as the project evolves.
+Cut Buddy is a static web app for voice-driven cut-list capture and 1D stock optimization.
 
+## Current App State (February 7, 2026)
+- Two primary experiences:
+  - Record experience for fast voice capture with confidence feedback.
+  - Plan experience for unit selection, stock configuration, and optimization results.
+- Client-side speech recognition and text-to-speech confirmation.
+- Fraction-capable measurement parsing (with known edge-case backlog in `plan.md`).
+- Best Fit Decreasing cutting-stock heuristic with kerf-aware waste and utilization metrics.
+- Local persistence via `localStorage`.
+- PWA shell (`manifest.webmanifest`, `sw.js`).
 
-## Structure
-- `index.html` — minimal markup with a header and placeholder section.
-- `styles/main.css` — baseline styling that centers content and sets a neutral system font.
-- `scripts/app.js` — empty script stub that simply logs a readiness message.
+## Project Files
+- `index.html` - app structure and UI regions.
+- `styles/main.css` - responsive styling for Record and Plan views.
+- `scripts/app.js` - speech capture, parsing, state, unit formatting, and optimization.
+- `SPEC.md` - product requirements and success criteria.
+- `plan.md` - execution plan and future change list.
+- `UI_DESIGN.md` - UI architecture and interaction principles.
 
-## Running Locally
-Any static server will do, e.g.
+## Run Locally
 ```bash
 cd /Users/brendan/dev/cut-buddy
 python3 -m http.server 8080
 ```
-Then open `http://localhost:8080`.
+Open `http://localhost:8080`.

@@ -3,98 +3,165 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Cut Buddy · Voice Confidence</title>
+    <title>Cut Buddy</title>
+    <meta name="theme-color" content="#103047" />
+    <meta name="description" content="Voice-driven 1D cut optimizer for stock planning." />
+    <link rel="manifest" href="manifest.webmanifest" />
     <link rel="stylesheet" href="styles/main.css" />
   </head>
   <body>
+    <div class="page-glow" aria-hidden="true"></div>
     <div class="app-shell">
       <header class="hero">
-        <p class="eyebrow">Voice-driven cut list assistant</p>
-        <h1>Interpretation confidence</h1>
-        <p>
-          The screen color mirrors how sure the recognizer is about what it just heard. This is the first
-          piece of the UI, built to feel calm when things are clear and urgent when the system needs help.
-        </p>
+        <div>
+          <p class="eyebrow">Cut Buddy</p>
+          <h1>Record cuts fast. Plan stock precisely.</h1>
+          <p>Use Record for rapid voice capture and Plan for units, stock setup, and optimization output.</p>
+        </div>
       </header>
 
       <main class="app-layout">
-        <section class="confidence-panel">
-          <div
-            class="confidence-screen"
-            role="status"
-            aria-live="polite"
-            data-state-label="Waiting for voice input"
-          >
-            <div class="confidence-overlay">
-              <p class="confidence-mode">Listening</p>
-              <p class="confidence-label" id="confidenceLabel">Waiting for voice input</p>
-              <p class="confidence-score" id="confidenceScore">—%</p>
-            </div>
-          </div>
+        <section id="recordView" class="mode-view record-view" aria-label="Recording view" hidden>
+          <div id="recordCanvas" class="record-canvas" role="status" aria-live="polite">
+            <p id="recordUnitBadge" class="record-unit">inches</p>
 
-          <div class="control-card" aria-label="Simulate confidence levels">
-            <div class="control-headline">
-              <div>
-                <p class="control-eyebrow">Voice controls</p>
-                <h2>Capture and interpret cuts</h2>
-              </div>
-              <span class="control-hint" id="recordingStatus">Recorder idle</span>
-            </div>
-            <p class="support-note" id="speechSupport">Checking speech recognition support...</p>
-
-            <label class="slider-label" for="confidenceRange">
-              Confidence (manual override)
-            </label>
-            <input
-              id="confidenceRange"
-              type="range"
-              min="0"
-              max="1"
-              step="0.01"
-              value="0.62"
-              aria-valuemin="0"
-              aria-valuemax="1"
-              aria-valuenow="0.62"
-            />
-
-            <div class="pill-row" role="group" aria-label="Jump to states">
-              <button class="pill" data-confidence="0.9">High (Calm)</button>
-              <button class="pill" data-confidence="0.55">Medium (Check)</button>
-              <button class="pill" data-confidence="0.25">Low (Fix)</button>
+            <div class="record-center">
+              <p class="record-confidence-label" id="confidenceLabel">Waiting for voice input</p>
+              <p class="record-confidence-score" id="confidenceScore">--%</p>
+              <p class="record-latest" id="recordLatestAccepted">Waiting for a cut...</p>
             </div>
 
-            <div class="capture-controls" role="group" aria-label="Recording controls">
-              <button class="action-button" id="toggleListening" type="button">Start recording</button>
-              <button class="ghost-button" id="clearCuts" type="button">Clear cuts</button>
+            <div class="record-stack">
+              <ul id="recordGroupedList" class="record-grouped-list"></ul>
+              <p class="support-note" id="speechSupport">Checking speech recognition support...</p>
             </div>
 
-            <label class="slider-label" for="phraseInput">Interpreted phrase (demo)</label>
-            <div class="phrase-row">
-              <input
-                id="phraseInput"
-                type="text"
-                value="three foot six"
-                autocomplete="off"
-                spellcheck="false"
-              />
-              <button class="ghost-button" id="addPhrase" type="button">Add cut</button>
+            <div class="record-actions">
+              <button id="recordToggleListening" class="record-button" type="button">Start recording</button>
             </div>
-
-            <div class="live-readout">
-              <p class="readout-eyebrow">Latest interpretation</p>
-              <p class="readout-line" id="liveTranscript">Waiting for speech...</p>
-            </div>
-
-            <section class="cuts-panel" aria-label="Captured cuts">
-              <div class="cuts-headline">
-                <h3>Captured cuts</h3>
-                <span id="cutsCount">0 items</span>
-              </div>
-              <ul id="cutsList"></ul>
-            </section>
           </div>
         </section>
 
+        <section id="planView" class="mode-view plan-view" aria-label="Planning view">
+          <section class="plan-top-grid">
+            <article class="card">
+              <div class="card-headline">
+                <h3>Plan Controls</h3>
+                <span id="recordingStatus">Recorder idle</span>
+              </div>
+
+              <label class="form-label" for="unitSelect">Working units</label>
+              <select id="unitSelect" class="select-input">
+                <option value="inches">Inches</option>
+                <option value="feet">Feet</option>
+                <option value="cm">Centimeters</option>
+                <option value="mm">Millimeters</option>
+              </select>
+
+              <div class="capture-controls">
+                <button class="action-button" id="goRecordFromPlan" type="button">Record cuts</button>
+                <button class="ghost-button" id="undoLastCut" type="button">Undo last</button>
+                <button class="ghost-button" id="clearCuts" type="button">Clear cuts</button>
+              </div>
+
+              <label class="slider-label" for="confidenceRange">Manual confidence override</label>
+              <input
+                id="confidenceRange"
+                type="range"
+                min="0"
+                max="1"
+                step="0.01"
+                value="0.62"
+                aria-valuemin="0"
+                aria-valuemax="1"
+                aria-valuenow="0.62"
+              />
+
+              <div class="pill-row" role="group" aria-label="Jump to confidence states">
+                <button class="pill" data-confidence="0.9" type="button">High</button>
+                <button class="pill" data-confidence="0.55" type="button">Medium</button>
+                <button class="pill" data-confidence="0.25" type="button">Low</button>
+              </div>
+              <p class="support-note" id="liveTranscript">Waiting for speech...</p>
+            </article>
+          </section>
+
+          <section class="workspace-grid" aria-label="Planning workspace">
+            <article class="card">
+              <div class="card-headline">
+                <h3>Input Intelligence</h3>
+                <span id="cutsCount">0 items</span>
+              </div>
+
+              <div class="stat-grid" aria-label="Cut statistics">
+                <div class="stat-pill">
+                  <p class="stat-label">Total length</p>
+                  <p class="stat-value" id="cutsTotalLength">0 in</p>
+                </div>
+                <div class="stat-pill">
+                  <p class="stat-label">Longest cut</p>
+                  <p class="stat-value" id="cutsLongest">0 in</p>
+                </div>
+                <div class="stat-pill">
+                  <p class="stat-label">Average cut</p>
+                  <p class="stat-value" id="cutsAverage">0 in</p>
+                </div>
+              </div>
+
+              <ul id="cutsList" class="cut-items"></ul>
+            </article>
+
+            <article class="card">
+              <div class="card-headline">
+                <h3>Stock Configuration</h3>
+                <span id="stockPreviewLabel">0 options</span>
+              </div>
+
+              <label class="form-label" for="stockInput">Stock lengths (comma-separated)</label>
+              <input id="stockInput" type="text" value="8 ft, 12 ft, 16 ft" autocomplete="off" />
+
+              <div id="stockPills" class="stock-pill-row" aria-live="polite"></div>
+
+              <label class="form-label" for="kerfInput">Blade kerf</label>
+              <input id="kerfInput" type="number" min="0" step="0.01" value="0.125" />
+
+              <div class="capture-controls">
+                <button class="action-button" id="calculatePlan" type="button">Calculate plan</button>
+                <button class="ghost-button" id="saveState" type="button">Save local</button>
+              </div>
+              <p class="support-note" id="stockStatus">Ready to optimize.</p>
+            </article>
+
+            <article class="card results-card">
+              <div class="card-headline">
+                <h3>Optimization Results</h3>
+                <span id="solverTag">Not run</span>
+              </div>
+
+              <div class="stat-grid result-stat-grid" aria-label="Result metrics">
+                <div class="stat-pill">
+                  <p class="stat-label">Stock pieces</p>
+                  <p class="stat-value" id="metricStockPieces">--</p>
+                </div>
+                <div class="stat-pill">
+                  <p class="stat-label">Total waste</p>
+                  <p class="stat-value" id="metricWaste">--</p>
+                </div>
+                <div class="stat-pill">
+                  <p class="stat-label">Utilization</p>
+                  <p class="stat-value" id="metricUtilization">--</p>
+                </div>
+                <div class="stat-pill">
+                  <p class="stat-label">Kerf impact</p>
+                  <p class="stat-value" id="metricKerfImpact">--</p>
+                </div>
+              </div>
+
+              <div id="resultSummary" class="result-summary">Add cuts and calculate to see cutting patterns.</div>
+              <ol id="patternsList" class="pattern-list"></ol>
+            </article>
+          </section>
+        </section>
       </main>
     </div>
 
