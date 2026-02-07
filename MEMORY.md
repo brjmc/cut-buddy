@@ -19,6 +19,14 @@
   - responsive spacing/tap targets tuned,
   - focus behavior added for record enter/exit.
 - Manual validation was completed by user and reflected as complete in plan tracking.
+- Added exact optimization stack:
+  - hybrid solver modes (`heuristic`, `exact`, `auto`) with guardrails,
+  - exact branch-and-bound solver in `scripts/engine.js`,
+  - Rust WASM solver crate at `native/cut_buddy_exact_wasm`,
+  - worker integration with WASM primary backend and JS fallback.
+- Added validation tooling for exact path:
+  - browser smoke page `wasm-smoke.html` requiring worker backend `wasm`,
+  - benchmark suite `scripts/benchmark-exact-solvers.js` with `total_*` and `kernel_*` timing splits.
 
 ### Current Product Reality
 - Parser now rejects unsupported formats (for example denominator-word variants like `13/64ths`) instead of producing bogus values.
@@ -26,6 +34,7 @@
 - Record view is immersive and prioritizes capture-centric information hierarchy.
 - Exiting recording returns to plan and jumps user to results context.
 - Core parser/optimizer behavior is testable outside the browser.
+- Exact solver behavior now has deterministic fixtures in both JS and Rust test paths.
 
 ### Source of Truth Files
 - Plan/status: `plan.md`

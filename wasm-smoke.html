@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cut Buddy WASM Smoke Check</title>
+    <style>
+      body {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        margin: 2rem;
+        max-width: 860px;
+        line-height: 1.4;
+      }
+
+      button {
+        padding: 0.5rem 0.85rem;
+        font-size: 0.95rem;
+      }
+
+      #smokeStatus {
+        margin-top: 1rem;
+        font-weight: 700;
+      }
+
+      #smokeDetail {
+        margin-top: 0.5rem;
+        white-space: pre-wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>WASM Smoke Check</h1>
+    <p>
+      Verifies that <code>scripts/exact-solver-worker.js</code> resolves a deterministic fixture using the WASM backend
+      (not JS fallback).
+    </p>
+    <button id="runSmoke" type="button">Run Smoke Check</button>
+    <p id="smokeStatus">Ready.</p>
+    <pre id="smokeDetail">Click the button to start.</pre>
+    <script src="scripts/wasm-smoke-check.js"></script>
+  </body>
+</html>

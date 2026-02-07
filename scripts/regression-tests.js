@@ -1,5 +1,5 @@
 const assert = require("node:assert/strict");
-const { evaluatePacking, parseMeasurement, parseStockInput } = require("./engine.js");
+const { evaluatePacking, evaluatePackingExact, parseMeasurement, parseStockInput } = require("./engine.js");
 
 const approxEqual = (actual, expected, epsilon = 1e-9) => {
   assert.ok(Math.abs(actual - expected) <= epsilon, `Expected ${actual} ~= ${expected}`);
@@ -47,7 +47,33 @@ const testOptimizer = () => {
   assert.throws(() => evaluatePacking([500], [96, 120], 0.125));
 };
 
+const testExactOptimizer = () => {
+  const cuts = [52, 48, 48, 45, 36, 24, 24];
+  const stocks = [96, 120];
+  const kerf = 0.125;
+
+  const heuristic = evaluatePacking(cuts, stocks, kerf);
+  const exact = evaluatePackingExact(cuts, stocks, kerf, { timeBudgetMs: 3000 });
+
+  assert.equal(exact.termination, "completed");
+  assert.equal(exact.optimality, "proven_optimal");
+  assert.ok(exact.exploredNodes > 0);
+
+  const heuristicObjective = heuristic.totalStockLength + kerf * heuristic.binCount;
+  const exactObjective = exact.totalStockLength + kerf * exact.binCount;
+  assert.ok(exactObjective <= heuristicObjective + 1e-9, "Exact objective must be at least as good as heuristic");
+
+  const timeoutCase = evaluatePackingExact(
+    [84, 84, 84, 84, 72, 72, 72, 72, 66, 66, 66, 66, 60, 60, 60, 60, 54, 54, 54, 54],
+    [96, 120, 144],
+    kerf,
+    { timeBudgetMs: 1 }
+  );
+  assert.ok(["timed_out", "completed"].includes(timeoutCase.termination));
+};
+
 testParser();
 testOptimizer();
+testExactOptimizer();
 
 console.log("Regression tests passed.");

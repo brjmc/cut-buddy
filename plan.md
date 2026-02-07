@@ -115,3 +115,57 @@ Target: align app flow to attached sketch with:
 
 ## Future Change List
 - After sketch parity, add a compact “jump to config” affordance when user is deep in results.
+
+## Exact Optimization (WASM) Plan (February 7, 2026)
+Goal: add an optional exact solver path that can prove optimality for small/medium jobs while preserving current fast UX.
+
+### Constraints and Product Rules
+- Keep current Best Fit Decreasing heuristic as default fast path.
+- Exact mode must be bounded by both input-size threshold and runtime budget.
+- Never block the UI thread; exact solver runs in a Web Worker.
+- If exact mode times out/fails, fall back to heuristic and surface clear status.
+
+### Phase 1 - Hybrid Scaffolding (No WASM Yet)
+1. [x] Add solver mode state and strategy selection (`heuristic`, `exact`, `auto`).
+2. [x] Add guardrails:
+- `maxCutsForExact` (initial: 50 cuts).
+- `exactTimeBudgetMs` (initial: 3000 ms).
+3. [x] Add result metadata:
+- `solverUsed` (`heuristic` | `exact` | `heuristic_fallback`),
+- `optimality` (`proven_optimal` | `not_proven` | `timed_out`).
+4. [x] Add UI copy for solver status and fallback reason.
+
+### Phase 2 - Exact Solver in Rust + WASM
+1. [x] Create Rust crate for exact 1D cutting-stock/bin-packing search.
+2. [x] Implement branch-and-bound with:
+- upper bound seeded by current heuristic,
+- lower bound from total-length/stock-capacity relaxation,
+- pruning on symmetric states and dominated bins.
+3. [x] Compile to `wasm32-unknown-unknown` and expose a compact API:
+- input: cuts, stock lengths, kerf, time budget,
+- output: bins, objective stats, status/termination reason.
+4. [x] Add deterministic fixtures to verify exact output parity and proof flags.
+
+### Phase 3 - Browser Integration
+1. [x] Add worker wrapper for WASM module loading/execution. (WASM primary path active with JS fallback)
+2. [x] Wire `auto` mode:
+- run heuristic immediately for instant preview,
+- run exact in background only when within threshold,
+- replace results only if exact finishes within budget.
+3. [x] Preserve cancellation semantics:
+- cancel in-flight exact solve on any input change.
+
+### Phase 4 - Validation and Rollout
+1. [x] Add benchmark script with representative cases (20/40/60/100 cuts).
+2. [ ] Record solve-time distributions for heuristic vs exact (desktop + mobile Chrome/Safari).
+3. [ ] Tune thresholds/time budget from measured p95 latencies.
+4. [ ] Gate release behind feature flag until:
+- no UI jank in record/plan workflow,
+- exact status messaging is clear,
+- fallback behavior is reliable.
+
+### Acceptance Criteria
+- User can see when output is proven optimal vs heuristic.
+- No UI freeze during exact runs.
+- For small/medium jobs, exact mode can frequently complete within budget.
+- Large/hard jobs degrade gracefully to heuristic with explicit explanation.

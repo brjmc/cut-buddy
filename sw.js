@@ -1,9 +1,12 @@
-const CACHE_NAME = "cut-buddy-shell-v1";
+const CACHE_NAME = "cut-buddy-shell-v2";
 const APP_SHELL = [
   "/",
   "/index.html",
   "/styles/main.css",
   "/scripts/app.js",
+  "/scripts/engine.js",
+  "/scripts/exact-solver-worker.js",
+  "/scripts/wasm/cut_buddy_exact_wasm.wasm",
   "/manifest.webmanifest"
 ];
 

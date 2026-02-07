@@ -37,6 +37,7 @@
   const stockPills = document.getElementById("stockPills");
   const stockPreviewLabel = document.getElementById("stockPreviewLabel");
   const kerfInput = document.getElementById("kerfInput");
+  const solverModeSelect = document.getElementById("solverModeSelect");
   const calculatePlanButton = document.getElementById("calculatePlan");
   const saveStateButton = document.getElementById("saveState");
   const stockStatus = document.getElementById("stockStatus");
@@ -47,6 +48,7 @@
   const metricUtilization = document.getElementById("metricUtilization");
   const metricKerfImpact = document.getElementById("metricKerfImpact");
   const resultSummary = document.getElementById("resultSummary");
+  const solverStatus = document.getElementById("solverStatus");
   const patternsList = document.getElementById("patternsList");
   const resultsSection = document.getElementById("resultsSection");
   const resultsHeading = document.getElementById("resultsHeading");
@@ -84,6 +86,7 @@
     !stockPills ||
     !stockPreviewLabel ||
     !kerfInput ||
+    !solverModeSelect ||
     !calculatePlanButton ||
     !saveStateButton ||
     !stockStatus ||
@@ -93,6 +96,7 @@
     !metricUtilization ||
     !metricKerfImpact ||
     !resultSummary ||
+    !solverStatus ||
     !patternsList ||
     !resultsSection ||
     !resultsHeading ||
@@ -130,6 +134,11 @@
     mm: { label: "millimeters", short: "mm" }
   };
   const METRIC_STOCK_MM = [2400, 3000, 3600];
+  const SOLVER_MODES = new Set(["heuristic", "exact", "auto"]);
+  const EXACT_GUARDRAILS = {
+    maxCutsForExact: 50,
+    exactTimeBudgetMs: 3000
+  };
   const DEFAULT_STOCK_PRESETS = {
     inches: [96, 144, 192],
     feet: [96, 144, 192],
@@ -149,7 +158,11 @@
     recognition: null,
     kerf: 0.125,
     stockLengths: [...DEFAULT_STOCK_PRESETS.inches],
-    lastResult: null
+    lastResult: null,
+    solverMode: "auto",
+    exactWorker: null,
+    exactRequestId: 0,
+    activeExactRequestId: null
   };
 
   const clampConfidence = (value) => {
@@ -334,6 +347,7 @@
     const measurement = parseMeasurement(correctedPhrase);
     if (!measurement) return false;
 
+    cancelInFlightExactSolve();
     state.cuts.push(measurement);
     renderCuts();
     recordLatestAccepted.textContent = `${formatByUnit(measurement.totalInches, false)} ${UNIT_META[state.unit].short} ✅`;
@@ -356,12 +370,108 @@
     state.stockLengths = [...preset];
   };
 
+  const nextExactRequestId = () => {
+    state.exactRequestId += 1;
+    return state.exactRequestId;
+  };
+
+  const ensureExactWorker = () => {
+    if (state.exactWorker) return state.exactWorker;
+    if (!("Worker" in window)) return null;
+
+    try {
+      const worker = new Worker("scripts/exact-solver-worker.js");
+      worker.addEventListener("message", (event) => {
+        const message = event.data || {};
+        if (message.type !== "solveResult") return;
+
+        if (message.requestId !== state.activeExactRequestId) {
+          return;
+        }
+
+        state.activeExactRequestId = null;
+
+        if (!message.ok) {
+          if (state.lastResult) {
+            state.lastResult.solverUsed = "heuristic_fallback";
+            state.lastResult.optimality = "not_proven";
+            state.lastResult.solverStatus = "Exact solve failed. Showing heuristic result.";
+          }
+          stockStatus.textContent = message.error || "Exact solve failed. Showing heuristic result.";
+          renderResults();
+          return;
+        }
+
+        const exactResult = message.result || {};
+        if (!state.lastResult) {
+          return;
+        }
+
+        if (exactResult.termination === "completed" && exactResult.optimality === "proven_optimal") {
+          const backendLabel = exactResult.solverBackend === "wasm" ? "WASM" : "JS";
+          state.lastResult = {
+            ...exactResult,
+            algorithm: "Exact branch-and-bound (worker)",
+            solverUsed: "exact",
+            optimality: "proven_optimal",
+            solverStatus: `Exact (${backendLabel}) completed in ${exactResult.elapsedMs} ms (${exactResult.exploredNodes} nodes).`
+          };
+          stockStatus.textContent = "Exact solve finished with proven optimality.";
+          renderResults();
+          saveLocalState();
+          return;
+        }
+
+        if (exactResult.termination === "timed_out") {
+          state.lastResult.solverUsed = "heuristic_fallback";
+          state.lastResult.optimality = "timed_out";
+          state.lastResult.solverStatus = `Exact timed out at ${EXACT_GUARDRAILS.exactTimeBudgetMs} ms. Showing heuristic result.`;
+          stockStatus.textContent = state.lastResult.solverStatus;
+          renderResults();
+          return;
+        }
+
+        state.lastResult.solverUsed = "heuristic_fallback";
+        state.lastResult.optimality = "not_proven";
+        state.lastResult.solverStatus = "Exact run cancelled or unavailable. Showing heuristic result.";
+        stockStatus.textContent = state.lastResult.solverStatus;
+        renderResults();
+      });
+      state.exactWorker = worker;
+      return worker;
+    } catch (_error) {
+      return null;
+    }
+  };
+
+  const cancelInFlightExactSolve = () => {
+    if (!state.exactWorker || !Number.isFinite(state.activeExactRequestId)) {
+      state.activeExactRequestId = null;
+      return;
+    }
+
+    state.exactWorker.postMessage({
+      type: "cancel",
+      requestId: state.activeExactRequestId
+    });
+    state.activeExactRequestId = null;
+  };
+
+  const createResultModel = (result, metadata) => ({
+    ...result,
+    algorithm: metadata.algorithm,
+    solverUsed: metadata.solverUsed,
+    optimality: metadata.optimality,
+    solverStatus: metadata.solverStatus
+  });
+
   const saveLocalState = () => {
     const payload = {
       unit: state.unit,
       cuts: state.cuts,
       kerf: state.kerf,
-      stockLengths: state.stockLengths
+      stockLengths: state.stockLengths,
+      solverMode: state.solverMode
     };
 
     try {
@@ -394,6 +504,10 @@
 
       if (Number.isFinite(payload.kerf) && payload.kerf >= 0) {
         state.kerf = payload.kerf;
+      }
+
+      if (typeof payload.solverMode === "string" && SOLVER_MODES.has(payload.solverMode)) {
+        state.solverMode = payload.solverMode;
       }
     } catch (_error) {
       // Ignore malformed payload.
@@ -448,6 +562,7 @@
       removeButton.className = "remove-button";
       removeButton.textContent = "Remove";
       removeButton.addEventListener("click", () => {
+        cancelInFlightExactSolve();
         state.cuts = state.cuts.filter((entry) => entry.id !== cut.id);
         renderCuts();
         renderResults();
@@ -478,6 +593,7 @@
           stockStatus.textContent = "Cut value must be greater than 0.";
           return;
         }
+        cancelInFlightExactSolve();
         cut.totalInches = nextValue;
         cut.raw = formatByUnit(cut.totalInches);
         renderCuts();
@@ -489,6 +605,7 @@
       duplicateButton.className = "ghost-button";
       duplicateButton.textContent = "Duplicate";
       duplicateButton.addEventListener("click", () => {
+        cancelInFlightExactSolve();
         state.cuts.push({
           ...cut,
           id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -538,6 +655,7 @@
     if (!result) {
       solverTag.textContent = "Not run";
       resultSummary.textContent = "Add cuts and calculate to see cutting patterns.";
+      solverStatus.textContent = "Solver status will appear after calculation.";
       metricStockPieces.textContent = "--";
       metricWaste.textContent = "--";
       metricUtilization.textContent = "--";
@@ -547,6 +665,7 @@
 
     solverTag.textContent = result.algorithm;
     resultSummary.textContent = `${result.binCount} stock pieces | ${formatByUnit(result.totalWaste)} waste | ${formatByUnit(result.totalUsed)} used`;
+    solverStatus.textContent = result.solverStatus || "";
 
     metricStockPieces.textContent = String(result.binCount);
     metricWaste.textContent = formatByUnit(result.totalWaste);
@@ -597,6 +716,7 @@
 
     const normalized = phrase.toLowerCase();
     if (normalized.includes("undo")) {
+      cancelInFlightExactSolve();
       state.cuts.pop();
       liveTranscript.textContent = "Last cut removed.";
       renderCuts();
@@ -604,6 +724,7 @@
     }
 
     if (normalized.includes("clear")) {
+      cancelInFlightExactSolve();
       state.cuts = [];
       state.lastResult = null;
       liveTranscript.textContent = "Cut list cleared.";
@@ -630,6 +751,7 @@
 
     setSupportText("Speech recognition active.");
     hideCorrectionPanel();
+    cancelInFlightExactSolve();
     state.cuts.push(measurement);
     renderCuts();
 
@@ -751,7 +873,49 @@
   const evaluatePacking = (cutLengths, stockLengths, kerf) =>
     Engine.evaluatePacking(cutLengths, stockLengths, kerf);
 
+  const shouldAttemptExactSolve = (cutCount) => {
+    if (state.solverMode === "heuristic") {
+      return { allowed: false, reason: "Heuristic mode selected." };
+    }
+
+    if (cutCount > EXACT_GUARDRAILS.maxCutsForExact) {
+      return {
+        allowed: false,
+        reason: `Exact skipped: ${cutCount} cuts exceeds limit ${EXACT_GUARDRAILS.maxCutsForExact}.`
+      };
+    }
+
+    return { allowed: true, reason: "" };
+  };
+
+  const runExactSolveInWorker = ({ cuts, stockLengths, kerf }) => {
+    const worker = ensureExactWorker();
+    if (!worker) {
+      if (state.lastResult) {
+        state.lastResult.solverUsed = "heuristic_fallback";
+        state.lastResult.optimality = "not_proven";
+        state.lastResult.solverStatus = "Exact unavailable in this browser. Showing heuristic result.";
+      }
+      stockStatus.textContent = "Exact unavailable in this browser. Showing heuristic result.";
+      renderResults();
+      return;
+    }
+
+    const requestId = nextExactRequestId();
+    state.activeExactRequestId = requestId;
+    worker.postMessage({
+      type: "solve",
+      requestId,
+      cuts,
+      stockLengths,
+      kerf,
+      timeBudgetMs: EXACT_GUARDRAILS.exactTimeBudgetMs
+    });
+  };
+
   const runOptimization = () => {
+    cancelInFlightExactSolve();
+
     const stockLengths = parseStockInput(stockInput.value);
     const kerf = Number.parseFloat(kerfInput.value);
 
@@ -775,14 +939,34 @@
 
     try {
       const cuts = state.cuts.map((cut) => cut.totalInches);
-      const result = evaluatePacking(cuts, stockLengths, kerf);
+      const heuristic = evaluatePacking(cuts, stockLengths, kerf);
+      const exactEligibility = shouldAttemptExactSolve(cuts.length);
 
-      state.lastResult = {
-        ...result,
-        algorithm: "Best Fit Decreasing"
-      };
+      const shouldQueueExact = exactEligibility.allowed && (state.solverMode === "auto" || state.solverMode === "exact");
+      const heuristicStatus = shouldQueueExact
+        ? `Heuristic preview shown. Running exact for up to ${EXACT_GUARDRAILS.exactTimeBudgetMs} ms.`
+        : exactEligibility.reason || "Heuristic mode selected.";
 
-      stockStatus.textContent = `Calculated with ${state.cuts.length} cuts across ${stockLengths.length} stock sizes.`;
+      state.lastResult = createResultModel(heuristic, {
+        algorithm: shouldQueueExact ? "Best Fit Decreasing (preview)" : "Best Fit Decreasing",
+        solverUsed: shouldQueueExact ? "heuristic" : "heuristic",
+        optimality: shouldQueueExact ? "not_proven" : "not_proven",
+        solverStatus: heuristicStatus
+      });
+
+      if (state.solverMode === "exact" && !exactEligibility.allowed) {
+        state.lastResult.solverUsed = "heuristic_fallback";
+        state.lastResult.optimality = "not_proven";
+        state.lastResult.solverStatus = `${exactEligibility.reason} Falling back to heuristic.`;
+      }
+
+      if (shouldQueueExact) {
+        runExactSolveInWorker({ cuts, stockLengths, kerf });
+      }
+
+      stockStatus.textContent = shouldQueueExact
+        ? `Heuristic preview ready. Exact solving in background (${cuts.length} cuts).`
+        : `Calculated with ${state.cuts.length} cuts across ${stockLengths.length} stock sizes.`;
       renderResults();
       saveLocalState();
     } catch (error) {
@@ -793,6 +977,7 @@
   const hydrateInputs = () => {
     kerfInput.value = String(state.kerf);
     stockInput.value = state.stockLengths.map((length) => formatByUnit(length)).join(", ");
+    solverModeSelect.value = state.solverMode;
     updateUnitUI();
     renderStockPreview();
   };
@@ -868,12 +1053,14 @@
   });
 
   undoLastCutButton.addEventListener("click", () => {
+    cancelInFlightExactSolve();
     state.cuts.pop();
     renderCuts();
     renderResults();
   });
 
   clearCutsButton.addEventListener("click", () => {
+    cancelInFlightExactSolve();
     state.cuts = [];
     state.lastResult = null;
     liveTranscript.textContent = "Cut list cleared.";
@@ -892,10 +1079,16 @@
   });
 
   stockInput.addEventListener("input", () => {
+    cancelInFlightExactSolve();
     renderStockPreview();
   });
 
+  kerfInput.addEventListener("input", () => {
+    cancelInFlightExactSolve();
+  });
+
   unitSelect.addEventListener("change", (event) => {
+    cancelInFlightExactSolve();
     const nextUnit = event.target.value;
     if (!UNIT_META[nextUnit]) return;
 
@@ -907,6 +1100,19 @@
     hydrateInputs();
     renderCuts();
     renderResults();
+  });
+
+  solverModeSelect.addEventListener("change", (event) => {
+    const nextMode = event.target.value;
+    if (!SOLVER_MODES.has(nextMode)) return;
+    cancelInFlightExactSolve();
+    state.solverMode = nextMode;
+    saveLocalState();
+    stockStatus.textContent = `Solver mode set to ${nextMode}.`;
+    if (state.lastResult) {
+      state.lastResult.solverStatus = "Solver mode changed. Recalculate to apply.";
+      renderResults();
+    }
   });
 
   loadLocalState();

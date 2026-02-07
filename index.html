@@ -81,6 +81,13 @@
               <label class="form-label" for="kerfInput">Blade kerf</label>
               <input id="kerfInput" type="number" min="0" step="0.01" value="0.125" />
 
+              <label class="form-label" for="solverModeSelect">Solver mode</label>
+              <select id="solverModeSelect" class="select-input">
+                <option value="auto">Auto (preview + exact when feasible)</option>
+                <option value="heuristic">Heuristic only</option>
+                <option value="exact">Exact (bounded)</option>
+              </select>
+
               <div class="capture-controls">
                 <button class="action-button" id="goRecordFromPlan" type="button">record</button>
                 <button class="ghost-button" id="saveState" type="button">Save local</button>
@@ -171,6 +178,7 @@
               </div>
 
               <div id="resultSummary" class="result-summary">Add cuts and calculate to see cutting patterns.</div>
+              <p id="solverStatus" class="support-note solver-status">Solver status will appear after calculation.</p>
               <ol id="patternsList" class="pattern-list"></ol>
             </article>
           </section>
