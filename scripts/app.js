@@ -140,7 +140,11 @@
 
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   const SpeechSynthesis = window.speechSynthesis;
-  const isChromeOniOS = /\bCriOS\b/i.test(navigator.userAgent || "");
+  const userAgent = navigator.userAgent || "";
+  const isIOS =
+    /\b(iPad|iPhone|iPod)\b/i.test(userAgent) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  const isChromeOniOS = isIOS && /\bCriOS\b/i.test(userAgent);
 
   const state = {
     mode: "plan",
@@ -1030,9 +1034,11 @@
 
   const mapSpeechError = (errorCode) => {
     if (errorCode === "not-allowed") return "Microphone permission denied.";
+    if (errorCode === "service-not-allowed") return "Speech recognition is blocked in this browser.";
     if (errorCode === "audio-capture") return "No microphone input detected.";
     if (errorCode === "network") return "Speech service network issue.";
     if (errorCode === "no-speech") return "No speech detected.";
+    if (errorCode === "language-not-supported") return "Speech recognition language is not supported.";
     if (errorCode === "aborted") return "Recognition stopped.";
     return "Speech recognition error.";
   };
@@ -1101,12 +1107,13 @@
   };
 
   const setupRecognition = () => {
+    if (isChromeOniOS) {
+      setSupportText("Speech recognition is unavailable in Chrome on iPhone/iPad. Use Safari.", true);
+      return;
+    }
+
     if (!SpeechRecognition) {
-      if (isChromeOniOS) {
-        setSupportText("Speech recognition is unavailable in Chrome on iOS. Use Safari on iPhone/iPad.", true);
-      } else {
-        setSupportText("SpeechRecognition is not supported in this browser.", true);
-      }
+      setSupportText("SpeechRecognition is not supported in this browser.", true);
       return;
     }
 
@@ -1152,11 +1159,13 @@
     };
 
     state.recognition.onerror = (event) => {
-      const errorMessage = mapSpeechError(event.error);
+      const errorCode = event && typeof event.error === "string" ? event.error : "";
+      const baseMessage = mapSpeechError(errorCode);
+      const errorMessage = errorCode && baseMessage === "Speech recognition error." ? `${baseMessage} (${errorCode})` : baseMessage;
       setSupportText(errorMessage, true);
       liveTranscript.textContent = errorMessage;
 
-      if (event.error === "not-allowed" || event.error === "audio-capture") {
+      if (errorCode === "not-allowed" || errorCode === "audio-capture" || errorCode === "service-not-allowed") {
         state.shouldListen = false;
       }
     };
