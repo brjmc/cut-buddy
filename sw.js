@@ -1,11 +1,21 @@
-const CACHE_NAME = "cut-buddy-shell-v2";
+const CACHE_NAME = "cut-buddy-shell-v5";
 const APP_SHELL = [
   "/",
   "/index.html",
+  "/mobile-benchmark.html",
+  "/wasm-smoke.html",
+  "/favicon.svg",
+  "/favicon.ico",
+  "/favicon.png",
+  "/apple-touch-icon.png",
+  "/icon-192.png",
+  "/icon-512.png",
   "/styles/main.css",
   "/scripts/app.js",
   "/scripts/engine.js",
   "/scripts/exact-solver-worker.js",
+  "/scripts/approx-improver-worker.js",
+  "/scripts/mobile-benchmark.js",
   "/scripts/wasm/cut_buddy_exact_wasm.wasm",
   "/manifest.webmanifest"
 ];

@@ -8,24 +8,18 @@
   const recordLatestAccepted = document.getElementById("recordLatestAccepted");
   const recordGroupedList = document.getElementById("recordGroupedList");
   const recordToggleListeningButton = document.getElementById("recordToggleListening");
-  const correctionPanel = document.getElementById("correctionPanel");
-  const correctionPrompt = document.getElementById("correctionPrompt");
-  const correctionInput = document.getElementById("correctionInput");
-  const applyCorrectionButton = document.getElementById("applyCorrection");
-  const dismissCorrectionButton = document.getElementById("dismissCorrection");
 
-  const slider = document.getElementById("confidenceRange");
   const labelEl = document.getElementById("confidenceLabel");
   const scoreEl = document.getElementById("confidenceScore");
-  const presetButtons = document.querySelectorAll(".pill[data-confidence]");
 
   const recordingStatus = document.getElementById("recordingStatus");
   const speechSupport = document.getElementById("speechSupport");
-  const undoLastCutButton = document.getElementById("undoLastCut");
   const clearCutsButton = document.getElementById("clearCuts");
 
   const unitSelect = document.getElementById("unitSelect");
   const liveTranscript = document.getElementById("liveTranscript");
+  const manualLengthInput = document.getElementById("manualLengthInput");
+  const addManualLengthButton = document.getElementById("addManualLength");
 
   const cutsList = document.getElementById("cutsList");
   const cutsCount = document.getElementById("cutsCount");
@@ -63,20 +57,15 @@
     !recordLatestAccepted ||
     !recordGroupedList ||
     !recordToggleListeningButton ||
-    !correctionPanel ||
-    !correctionPrompt ||
-    !correctionInput ||
-    !applyCorrectionButton ||
-    !dismissCorrectionButton ||
-    !slider ||
     !labelEl ||
     !scoreEl ||
     !recordingStatus ||
     !speechSupport ||
-    !undoLastCutButton ||
     !clearCutsButton ||
     !unitSelect ||
     !liveTranscript ||
+    !manualLengthInput ||
+    !addManualLengthButton ||
     !cutsList ||
     !cutsCount ||
     !cutsTotalLength ||
@@ -136,8 +125,11 @@
   const METRIC_STOCK_MM = [2400, 3000, 3600];
   const SOLVER_MODES = new Set(["heuristic", "exact", "auto"]);
   const EXACT_GUARDRAILS = {
-    maxCutsForExact: 50,
-    exactTimeBudgetMs: 3000
+    maxCutsForExact: 16,
+    exactTimeBudgetMs: 20000
+  };
+  const APPROX_GUARDRAILS = {
+    approxTimeBudgetMs: 3000
   };
   const DEFAULT_STOCK_PRESETS = {
     inches: [96, 144, 192],
@@ -162,7 +154,12 @@
     solverMode: "auto",
     exactWorker: null,
     exactRequestId: 0,
-    activeExactRequestId: null
+    activeExactRequestId: null,
+    approxWorker: null,
+    approxRequestId: 0,
+    activeApproxRequestId: null,
+    selectedRecordLengthKey: null,
+    selectedCutsLengthKey: null
   };
 
   const clampConfidence = (value) => {
@@ -281,8 +278,6 @@
     recordCanvas.style.color = confidenceState.textColor;
     labelEl.textContent = confidenceState.label;
     scoreEl.textContent = `${percent}%`;
-    slider.value = confidence.toString();
-    slider.setAttribute("aria-valuenow", confidence.toFixed(2));
     recordCanvas.setAttribute("aria-label", `${confidenceState.label} at ${percent} percent confidence`);
   };
 
@@ -310,12 +305,6 @@
     recordUnitBadge.textContent = getDefaultUnitLabel();
   };
 
-  const hideCorrectionPanel = () => {
-    correctionPanel.hidden = true;
-    correctionPrompt.textContent = "";
-    correctionInput.value = "";
-  };
-
   const scrollToResultsAfterRecordExit = () => {
     const prefersReducedMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const behavior = prefersReducedMotion ? "auto" : "smooth";
@@ -332,37 +321,75 @@
     });
   };
 
-  const showCorrectionPanel = (phrase) => {
-    correctionPanel.hidden = false;
-    correctionPrompt.textContent = `Could not parse: "${phrase}"`;
-    correctionInput.value = phrase;
-    correctionInput.focus();
-    correctionInput.select();
-  };
-
-  const addCorrectedCut = (phrase, shouldSpeak = false) => {
-    const correctedPhrase = phrase.trim();
-    if (!correctedPhrase) return false;
-
-    const measurement = parseMeasurement(correctedPhrase);
-    if (!measurement) return false;
-
-    cancelInFlightExactSolve();
-    state.cuts.push(measurement);
-    renderCuts();
-    recordLatestAccepted.textContent = `${formatByUnit(measurement.totalInches, false)} ${UNIT_META[state.unit].short} ✅`;
-    liveTranscript.textContent = `Corrected: ${correctedPhrase}`;
-    hideCorrectionPanel();
-
-    if (shouldSpeak) {
-      speakText(measurement.raw);
-    }
-
-    return true;
-  };
-
   const parseMeasurement = (phrase) => Engine.parseMeasurement(phrase, state.unit);
   const parseStockInput = (text) => Engine.parseStockInput(text, state.unit);
+  const lengthKeyFromInches = (inches) => Number(inches).toFixed(6);
+
+  const addManualLength = (inches) => {
+    cancelInFlightBackgroundSolves();
+    const key = lengthKeyFromInches(inches);
+    state.cuts.push({
+      id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      raw: formatByUnit(inches),
+      totalInches: inches
+    });
+    state.selectedRecordLengthKey = key;
+    state.selectedCutsLengthKey = key;
+    recordLatestAccepted.textContent = `${formatByUnit(inches, false)} ${UNIT_META[state.unit].short} ✅`;
+    liveTranscript.textContent = `Adjusted count: ${formatByUnit(inches, false)} +1`;
+    renderCuts();
+    renderResults();
+  };
+
+  const decrementManualLength = (inches) => {
+    const targetKey = lengthKeyFromInches(inches);
+    for (let index = state.cuts.length - 1; index >= 0; index -= 1) {
+      if (lengthKeyFromInches(state.cuts[index].totalInches) !== targetKey) continue;
+      cancelInFlightBackgroundSolves();
+      state.cuts.splice(index, 1);
+      const stillExists = state.cuts.some((cut) => lengthKeyFromInches(cut.totalInches) === targetKey);
+      if (!stillExists) {
+        state.selectedRecordLengthKey = null;
+        state.selectedCutsLengthKey = null;
+      }
+      liveTranscript.textContent = `Adjusted count: ${formatByUnit(inches, false)} -1`;
+      renderCuts();
+      renderResults();
+      return;
+    }
+  };
+
+  const removeManualLength = (inches) => {
+    const targetKey = lengthKeyFromInches(inches);
+    cancelInFlightBackgroundSolves();
+    state.cuts = state.cuts.filter((cut) => lengthKeyFromInches(cut.totalInches) !== targetKey);
+    state.selectedRecordLengthKey = null;
+    state.selectedCutsLengthKey = null;
+    liveTranscript.textContent = `Removed all ${formatByUnit(inches, false)} entries.`;
+    renderCuts();
+    renderResults();
+  };
+
+  const addManualLengthFromInput = () => {
+    const phrase = manualLengthInput.value.trim();
+    if (!phrase) return;
+    const measurement = parseMeasurement(phrase);
+    if (!measurement) {
+      liveTranscript.textContent = `Could not parse manual length: "${phrase}"`;
+      return;
+    }
+
+    cancelInFlightBackgroundSolves();
+    state.cuts.push(measurement);
+    const key = lengthKeyFromInches(measurement.totalInches);
+    state.selectedRecordLengthKey = key;
+    state.selectedCutsLengthKey = key;
+    recordLatestAccepted.textContent = `${formatByUnit(measurement.totalInches, false)} ${UNIT_META[state.unit].short} ✅`;
+    liveTranscript.textContent = `Manually added: ${phrase}`;
+    manualLengthInput.value = "";
+    renderCuts();
+    renderResults();
+  };
 
   const applyDefaultStockPresetForUnit = (unit) => {
     const preset = DEFAULT_STOCK_PRESETS[unit];
@@ -370,9 +397,19 @@
     state.stockLengths = [...preset];
   };
 
+  const objectiveOf = (result) => {
+    if (!result) return Number.POSITIVE_INFINITY;
+    return result.totalStockLength + state.kerf * result.binCount;
+  };
+
   const nextExactRequestId = () => {
     state.exactRequestId += 1;
     return state.exactRequestId;
+  };
+
+  const nextApproxRequestId = () => {
+    state.approxRequestId += 1;
+    return state.approxRequestId;
   };
 
   const ensureExactWorker = () => {
@@ -408,6 +445,7 @@
         }
 
         if (exactResult.termination === "completed" && exactResult.optimality === "proven_optimal") {
+          cancelInFlightApproxSolve();
           const backendLabel = exactResult.solverBackend === "wasm" ? "WASM" : "JS";
           state.lastResult = {
             ...exactResult,
@@ -417,7 +455,7 @@
             solverStatus: `Exact (${backendLabel}) completed in ${exactResult.elapsedMs} ms (${exactResult.exploredNodes} nodes).`
           };
           stockStatus.textContent = "Exact solve finished with proven optimality.";
-          renderResults();
+          renderPlanAndCutStatus();
           saveLocalState();
           return;
         }
@@ -444,6 +482,91 @@
     }
   };
 
+  const ensureApproxWorker = () => {
+    if (state.approxWorker) return state.approxWorker;
+    if (!("Worker" in window)) return null;
+
+    try {
+      const worker = new Worker("scripts/approx-improver-worker.js");
+      worker.addEventListener("message", (event) => {
+        const message = event.data || {};
+        if (message.requestId !== state.activeApproxRequestId) {
+          return;
+        }
+        if (!state.lastResult) {
+          return;
+        }
+
+        if (message.type === "progress") {
+          const progress = message.progress || {};
+          const elapsedMs = Number(progress.elapsedMs) || 0;
+          const iterations = Number(progress.iterations) || 0;
+          const improvements = Number(progress.improvements) || 0;
+          state.lastResult.solverStatus = `Approx search running (${elapsedMs.toFixed(0)} ms, ${iterations} iterations, ${improvements} improvements).`;
+          renderResults();
+          return;
+        }
+
+        if (message.type === "improvement") {
+          const improvement = message.improvement || {};
+          const candidate = improvement.candidate;
+          if (!candidate) return;
+          if (objectiveOf(candidate) >= objectiveOf(state.lastResult) - 1e-9) {
+            return;
+          }
+
+          state.lastResult = {
+            ...candidate,
+            algorithm: "Anytime approximate (worker)",
+            solverUsed: "approx",
+            optimality: "not_proven",
+            solverStatus: `Approx improved objective in ${improvement.elapsedMs} ms after ${improvement.iterations} iterations.`
+          };
+          stockStatus.textContent = "Approximate improver found a better plan.";
+          renderPlanAndCutStatus();
+          saveLocalState();
+          return;
+        }
+
+        if (message.type === "done") {
+          state.activeApproxRequestId = null;
+          const result = message.result || {};
+          const improved = result && objectiveOf(result) < objectiveOf(state.lastResult) - 1e-9;
+          if (improved) {
+            state.lastResult = {
+              ...result,
+              algorithm: "Anytime approximate (worker)",
+              solverUsed: "approx",
+              optimality: "not_proven",
+              solverStatus: `Approx completed in ${result.elapsedMs} ms (${result.improvements} improvements).`
+            };
+            stockStatus.textContent = "Approximate worker completed with an improved plan.";
+            renderPlanAndCutStatus();
+            saveLocalState();
+            return;
+          }
+
+          const termination = result.termination || "completed";
+          state.lastResult.solverStatus = `Approx ${termination} after ${result.elapsedMs || 0} ms; current plan retained.`;
+          stockStatus.textContent = state.lastResult.solverStatus;
+          renderResults();
+          return;
+        }
+
+        if (message.type === "error") {
+          state.activeApproxRequestId = null;
+          state.lastResult.solverStatus = "Approximate improver failed. Keeping current plan.";
+          stockStatus.textContent = message.message || state.lastResult.solverStatus;
+          renderResults();
+        }
+      });
+      state.approxWorker = worker;
+      return worker;
+    } catch (_error) {
+      return null;
+    }
+  };
+
   const cancelInFlightExactSolve = () => {
     if (!state.exactWorker || !Number.isFinite(state.activeExactRequestId)) {
       state.activeExactRequestId = null;
@@ -457,6 +580,24 @@
     state.activeExactRequestId = null;
   };
 
+  const cancelInFlightApproxSolve = () => {
+    if (!state.approxWorker || !Number.isFinite(state.activeApproxRequestId)) {
+      state.activeApproxRequestId = null;
+      return;
+    }
+
+    state.approxWorker.postMessage({
+      type: "cancel",
+      requestId: state.activeApproxRequestId
+    });
+    state.activeApproxRequestId = null;
+  };
+
+  const cancelInFlightBackgroundSolves = () => {
+    cancelInFlightExactSolve();
+    cancelInFlightApproxSolve();
+  };
+
   const createResultModel = (result, metadata) => ({
     ...result,
     algorithm: metadata.algorithm,
@@ -464,6 +605,11 @@
     optimality: metadata.optimality,
     solverStatus: metadata.solverStatus
   });
+
+  const renderPlanAndCutStatus = () => {
+    renderResults();
+    renderCuts();
+  };
 
   const saveLocalState = () => {
     const payload = {
@@ -518,27 +664,95 @@
     recordGroupedList.innerHTML = "";
 
     if (!state.cuts.length) {
+      state.selectedRecordLengthKey = null;
       const emptyItem = document.createElement("li");
       emptyItem.textContent = "No cuts captured yet";
       recordGroupedList.appendChild(emptyItem);
       return;
     }
 
-    const grouped = new Map();
-    state.cuts.forEach((cut) => {
-      const key = formatByUnit(cut.totalInches, false);
-      const existing = grouped.get(key);
+    const groups = new Map();
+    const recencyOrder = [];
+
+    // Walk from newest -> oldest so repeated values stay grouped, but newest value stays at top.
+    for (let index = state.cuts.length - 1; index >= 0; index -= 1) {
+      const cut = state.cuts[index];
+      const key = lengthKeyFromInches(cut.totalInches);
+      const existing = groups.get(key);
       if (existing) {
         existing.count += 1;
       } else {
-        grouped.set(key, { key, count: 1, numeric: cut.totalInches });
+        groups.set(key, {
+          key,
+          inches: cut.totalInches,
+          label: formatByUnit(cut.totalInches, false),
+          count: 1
+        });
+        recencyOrder.push(key);
       }
-    });
+    }
 
-    const sorted = [...grouped.values()].sort((a, b) => b.count - a.count || b.numeric - a.numeric);
-    sorted.slice(0, 8).forEach((entry) => {
+    if (state.selectedRecordLengthKey && !groups.has(state.selectedRecordLengthKey)) {
+      state.selectedRecordLengthKey = null;
+    }
+
+    recencyOrder.slice(0, 8).forEach((key) => {
+      const entry = groups.get(key);
+      if (!entry) return;
       const item = document.createElement("li");
-      item.textContent = `${entry.key} x ${entry.count}`;
+      item.className = "record-grouped-item";
+      if (state.selectedRecordLengthKey === key) {
+        item.classList.add("is-selected");
+      }
+
+      const labelButton = document.createElement("button");
+      labelButton.type = "button";
+      labelButton.className = "record-length-button";
+      labelButton.textContent = `${entry.label} x ${entry.count}`;
+      labelButton.addEventListener("click", () => {
+        state.selectedRecordLengthKey = state.selectedRecordLengthKey === key ? null : key;
+        renderRecordSummary();
+      });
+      item.appendChild(labelButton);
+
+      if (state.selectedRecordLengthKey === key) {
+        const actions = document.createElement("div");
+        actions.className = "record-length-actions";
+
+        const incrementButton = document.createElement("button");
+        incrementButton.type = "button";
+        incrementButton.className = "record-icon-button";
+        incrementButton.textContent = "+";
+        incrementButton.setAttribute("aria-label", `Add one ${entry.label}`);
+        incrementButton.addEventListener("click", (event) => {
+          event.stopPropagation();
+          addManualLength(entry.inches);
+        });
+
+        const decrementButton = document.createElement("button");
+        decrementButton.type = "button";
+        decrementButton.className = "record-icon-button";
+        decrementButton.textContent = "-";
+        decrementButton.setAttribute("aria-label", `Remove one ${entry.label}`);
+        decrementButton.addEventListener("click", (event) => {
+          event.stopPropagation();
+          decrementManualLength(entry.inches);
+        });
+
+        const trashButton = document.createElement("button");
+        trashButton.type = "button";
+        trashButton.className = "record-icon-button";
+        trashButton.textContent = "🗑";
+        trashButton.setAttribute("aria-label", `Remove all ${entry.label}`);
+        trashButton.addEventListener("click", (event) => {
+          event.stopPropagation();
+          removeManualLength(entry.inches);
+        });
+
+        actions.append(incrementButton, decrementButton, trashButton);
+        item.appendChild(actions);
+      }
+
       recordGroupedList.appendChild(item);
     });
   };
@@ -546,76 +760,125 @@
   const renderCuts = () => {
     cutsList.innerHTML = "";
 
-    state.cuts.forEach((cut, index) => {
+    const grouped = new Map();
+    const order = [];
+    for (let index = 0; index < state.cuts.length; index += 1) {
+      const cut = state.cuts[index];
+      const key = lengthKeyFromInches(cut.totalInches);
+      const existing = grouped.get(key);
+      if (existing) {
+        existing.count += 1;
+      } else {
+        grouped.set(key, { key, inches: cut.totalInches, count: 1 });
+        order.push(key);
+      }
+    }
+
+    const ordered = order
+      .slice()
+      .reverse()
+      .map((key) => grouped.get(key))
+      .filter(Boolean);
+    const cutKeys = new Set(ordered.map((entry) => entry.key));
+    if (state.selectedCutsLengthKey && !cutKeys.has(state.selectedCutsLengthKey)) {
+      state.selectedCutsLengthKey = null;
+    }
+
+    const plannedCounts = new Map();
+    if (state.lastResult && Array.isArray(state.lastResult.bins)) {
+      state.lastResult.bins.forEach((bin) => {
+        if (!bin || !Array.isArray(bin.cuts)) return;
+        bin.cuts.forEach((cutValue) => {
+          const key = lengthKeyFromInches(cutValue);
+          plannedCounts.set(key, (plannedCounts.get(key) || 0) + 1);
+        });
+      });
+    }
+
+    ordered.forEach((entry) => {
       const item = document.createElement("li");
-      item.className = "cut-item";
+      item.className = "cut-summary-item";
+      if (state.selectedCutsLengthKey === entry.key) {
+        item.classList.add("is-selected");
+      }
 
       const row = document.createElement("div");
-      row.className = "cut-row";
-
-      const text = document.createElement("span");
-      text.className = "cut-phrase";
-      text.textContent = `${index + 1}. ${cut.raw}`;
-
-      const removeButton = document.createElement("button");
-      removeButton.type = "button";
-      removeButton.className = "remove-button";
-      removeButton.textContent = "Remove";
-      removeButton.addEventListener("click", () => {
-        cancelInFlightExactSolve();
-        state.cuts = state.cuts.filter((entry) => entry.id !== cut.id);
+      row.className = "cut-summary-row";
+      row.setAttribute("role", "button");
+      row.setAttribute("tabindex", "0");
+      row.setAttribute("aria-label", `${formatByUnit(entry.inches)}, quantity ${entry.count}`);
+      row.addEventListener("click", () => {
+        state.selectedCutsLengthKey = state.selectedCutsLengthKey === entry.key ? null : entry.key;
         renderCuts();
-        renderResults();
+      });
+      row.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        state.selectedCutsLengthKey = state.selectedCutsLengthKey === entry.key ? null : entry.key;
+        renderCuts();
       });
 
-      row.append(text, removeButton);
+      const lengthLabel = document.createElement("span");
+      lengthLabel.className = "cut-summary-length";
+      lengthLabel.textContent = formatByUnit(entry.inches);
 
-      const meta = document.createElement("p");
-      meta.className = "cut-meta";
-      meta.textContent = `Parsed: ${formatByUnit(cut.totalInches)}`;
+      const quantityLabel = document.createElement("span");
+      quantityLabel.className = "cut-summary-qty";
+      quantityLabel.textContent = `x ${entry.count}`;
 
-      const editRow = document.createElement("div");
-      editRow.className = "cut-edit";
+      const inPlanCount = plannedCounts.get(entry.key) || 0;
+      const accounted = state.lastResult ? inPlanCount >= entry.count : null;
+      const statusIcon = document.createElement("span");
+      statusIcon.className = `cut-summary-status ${accounted === true ? "is-accounted" : accounted === false ? "is-missing" : "is-pending"}`;
+      statusIcon.textContent = accounted === null ? "•" : accounted ? "✓" : "!";
+      statusIcon.title =
+        accounted === null
+          ? "Plan not calculated yet"
+          : accounted
+            ? "All quantity accounted for in current plan"
+            : "This cut length is not fully covered by the current cut plan.";
+      statusIcon.setAttribute("aria-label", statusIcon.title);
 
-      const editInput = document.createElement("input");
-      editInput.type = "number";
-      editInput.step = "0.001";
-      editInput.min = "0";
-      editInput.value = String(cut.totalInches);
+      row.append(lengthLabel, quantityLabel, statusIcon);
 
-      const updateButton = document.createElement("button");
-      updateButton.type = "button";
-      updateButton.className = "ghost-button";
-      updateButton.textContent = "Update";
-      updateButton.addEventListener("click", () => {
-        const nextValue = Number.parseFloat(editInput.value);
-        if (!Number.isFinite(nextValue) || nextValue <= 0) {
-          stockStatus.textContent = "Cut value must be greater than 0.";
-          return;
-        }
-        cancelInFlightExactSolve();
-        cut.totalInches = nextValue;
-        cut.raw = formatByUnit(cut.totalInches);
-        renderCuts();
-        renderResults();
-      });
+      if (state.selectedCutsLengthKey === entry.key) {
+        const adjustWrap = document.createElement("div");
+        adjustWrap.className = "cut-summary-adjust";
 
-      const duplicateButton = document.createElement("button");
-      duplicateButton.type = "button";
-      duplicateButton.className = "ghost-button";
-      duplicateButton.textContent = "Duplicate";
-      duplicateButton.addEventListener("click", () => {
-        cancelInFlightExactSolve();
-        state.cuts.push({
-          ...cut,
-          id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-          raw: `${cut.raw} (dup)`
+        const decrementButton = document.createElement("button");
+        decrementButton.type = "button";
+        decrementButton.className = "cut-summary-step";
+        decrementButton.textContent = "-";
+        decrementButton.setAttribute("aria-label", `Remove one ${formatByUnit(entry.inches)}`);
+        decrementButton.addEventListener("click", (event) => {
+          event.stopPropagation();
+          decrementManualLength(entry.inches);
         });
-        renderCuts();
-      });
 
-      editRow.append(editInput, updateButton, duplicateButton);
-      item.append(row, meta, editRow);
+        const incrementButton = document.createElement("button");
+        incrementButton.type = "button";
+        incrementButton.className = "cut-summary-step";
+        incrementButton.textContent = "+";
+        incrementButton.setAttribute("aria-label", `Add one ${formatByUnit(entry.inches)}`);
+        incrementButton.addEventListener("click", (event) => {
+          event.stopPropagation();
+          addManualLength(entry.inches);
+        });
+
+        const removeButton = document.createElement("button");
+        removeButton.type = "button";
+        removeButton.className = "cut-summary-trash";
+        removeButton.textContent = "🗑";
+        removeButton.setAttribute("aria-label", `Remove ${formatByUnit(entry.inches)} cuts`);
+        removeButton.addEventListener("click", (event) => {
+          event.stopPropagation();
+          removeManualLength(entry.inches);
+        });
+
+        adjustWrap.append(decrementButton, incrementButton, removeButton);
+        row.append(adjustWrap);
+      }
+      item.appendChild(row);
       cutsList.appendChild(item);
     });
 
@@ -716,7 +979,7 @@
 
     const normalized = phrase.toLowerCase();
     if (normalized.includes("undo")) {
-      cancelInFlightExactSolve();
+      cancelInFlightBackgroundSolves();
       state.cuts.pop();
       liveTranscript.textContent = "Last cut removed.";
       renderCuts();
@@ -724,7 +987,7 @@
     }
 
     if (normalized.includes("clear")) {
-      cancelInFlightExactSolve();
+      cancelInFlightBackgroundSolves();
       state.cuts = [];
       state.lastResult = null;
       liveTranscript.textContent = "Cut list cleared.";
@@ -745,13 +1008,13 @@
       liveTranscript.textContent = `Could not parse: \"${phrase}\"`;
       setSupportText(`Could not parse: "${phrase}"`, true);
       applyConfidence(0.2);
-      showCorrectionPanel(phrase);
       return;
     }
 
     setSupportText("Speech recognition active.");
-    hideCorrectionPanel();
-    cancelInFlightExactSolve();
+    cancelInFlightBackgroundSolves();
+    state.selectedRecordLengthKey = null;
+    state.selectedCutsLengthKey = null;
     state.cuts.push(measurement);
     renderCuts();
 
@@ -913,8 +1176,32 @@
     });
   };
 
+  const runApproxSolveInWorker = ({ cuts, stockLengths, kerf }) => {
+    const worker = ensureApproxWorker();
+    if (!worker) {
+      if (state.lastResult) {
+        state.lastResult.solverStatus = "Approximate improver unavailable in this browser.";
+      }
+      stockStatus.textContent = "Approximate improver unavailable in this browser.";
+      renderResults();
+      return;
+    }
+
+    const requestId = nextApproxRequestId();
+    state.activeApproxRequestId = requestId;
+    worker.postMessage({
+      type: "start",
+      requestId,
+      cuts,
+      stockLengths,
+      kerf,
+      timeBudgetMs: APPROX_GUARDRAILS.approxTimeBudgetMs,
+      seed: requestId + cuts.length
+    });
+  };
+
   const runOptimization = () => {
-    cancelInFlightExactSolve();
+    cancelInFlightBackgroundSolves();
 
     const stockLengths = parseStockInput(stockInput.value);
     const kerf = Number.parseFloat(kerfInput.value);
@@ -943,14 +1230,20 @@
       const exactEligibility = shouldAttemptExactSolve(cuts.length);
 
       const shouldQueueExact = exactEligibility.allowed && (state.solverMode === "auto" || state.solverMode === "exact");
-      const heuristicStatus = shouldQueueExact
-        ? `Heuristic preview shown. Running exact for up to ${EXACT_GUARDRAILS.exactTimeBudgetMs} ms.`
-        : exactEligibility.reason || "Heuristic mode selected.";
+      const shouldQueueApprox = state.solverMode === "auto";
+      const statusParts = [];
+      if (shouldQueueExact) {
+        statusParts.push(`Running exact for up to ${EXACT_GUARDRAILS.exactTimeBudgetMs} ms.`);
+      }
+      if (shouldQueueApprox) {
+        statusParts.push(`Running approximate improver for up to ${APPROX_GUARDRAILS.approxTimeBudgetMs} ms.`);
+      }
+      const heuristicStatus = statusParts.length ? `Heuristic preview shown. ${statusParts.join(" ")}` : exactEligibility.reason || "Heuristic mode selected.";
 
       state.lastResult = createResultModel(heuristic, {
         algorithm: shouldQueueExact ? "Best Fit Decreasing (preview)" : "Best Fit Decreasing",
-        solverUsed: shouldQueueExact ? "heuristic" : "heuristic",
-        optimality: shouldQueueExact ? "not_proven" : "not_proven",
+        solverUsed: "heuristic",
+        optimality: "not_proven",
         solverStatus: heuristicStatus
       });
 
@@ -963,11 +1256,20 @@
       if (shouldQueueExact) {
         runExactSolveInWorker({ cuts, stockLengths, kerf });
       }
+      if (shouldQueueApprox) {
+        runApproxSolveInWorker({ cuts, stockLengths, kerf });
+      }
 
-      stockStatus.textContent = shouldQueueExact
-        ? `Heuristic preview ready. Exact solving in background (${cuts.length} cuts).`
-        : `Calculated with ${state.cuts.length} cuts across ${stockLengths.length} stock sizes.`;
-      renderResults();
+      if (shouldQueueExact && shouldQueueApprox) {
+        stockStatus.textContent = `Heuristic preview ready. Exact + approx running in background (${cuts.length} cuts).`;
+      } else if (shouldQueueExact) {
+        stockStatus.textContent = `Heuristic preview ready. Exact solving in background (${cuts.length} cuts).`;
+      } else if (shouldQueueApprox) {
+        stockStatus.textContent = `Heuristic preview ready. Approximate improver running in background (${cuts.length} cuts).`;
+      } else {
+        stockStatus.textContent = `Calculated with ${state.cuts.length} cuts across ${stockLengths.length} stock sizes.`;
+      }
+      renderPlanAndCutStatus();
       saveLocalState();
     } catch (error) {
       stockStatus.textContent = error instanceof Error ? error.message : "Calculation failed.";
@@ -989,14 +1291,12 @@
 
   const enterRecordMode = () => {
     setMode("record");
-    hideCorrectionPanel();
     startListening();
     recordToggleListeningButton.focus();
   };
 
   const exitRecordMode = () => {
     stopListening();
-    hideCorrectionPanel();
     setMode("plan");
     scrollToResultsAfterRecordExit();
   };
@@ -1011,17 +1311,6 @@
     });
   };
 
-  slider.addEventListener("input", (event) => {
-    applyConfidence(Number.parseFloat(event.target.value));
-  });
-
-  presetButtons.forEach((button) => {
-    button.addEventListener("click", () => {
-      const value = Number.parseFloat(button.dataset.confidence || "0");
-      applyConfidence(value);
-    });
-  });
-
   goRecordFromPlanButton.addEventListener("click", () => enterRecordMode());
 
   recordToggleListeningButton.addEventListener("click", () => {
@@ -1032,42 +1321,26 @@
     }
   });
 
-  applyCorrectionButton.addEventListener("click", () => {
-    const success = addCorrectedCut(correctionInput.value, false);
-    if (!success) {
-      correctionPrompt.textContent = `Still could not parse: "${correctionInput.value.trim()}"`;
-      correctionInput.focus();
-      correctionInput.select();
-    }
-  });
-
-  dismissCorrectionButton.addEventListener("click", () => {
-    hideCorrectionPanel();
-    liveTranscript.textContent = "Correction dismissed.";
-  });
-
-  correctionInput.addEventListener("keydown", (event) => {
-    if (event.key !== "Enter") return;
-    event.preventDefault();
-    applyCorrectionButton.click();
-  });
-
-  undoLastCutButton.addEventListener("click", () => {
-    cancelInFlightExactSolve();
-    state.cuts.pop();
-    renderCuts();
-    renderResults();
-  });
-
   clearCutsButton.addEventListener("click", () => {
-    cancelInFlightExactSolve();
+    cancelInFlightBackgroundSolves();
     state.cuts = [];
     state.lastResult = null;
+    state.selectedRecordLengthKey = null;
+    state.selectedCutsLengthKey = null;
     liveTranscript.textContent = "Cut list cleared.";
     recordLatestAccepted.textContent = "Waiting for a cut...";
-    hideCorrectionPanel();
     renderCuts();
     renderResults();
+  });
+
+  addManualLengthButton.addEventListener("click", () => {
+    addManualLengthFromInput();
+  });
+
+  manualLengthInput.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    addManualLengthFromInput();
   });
 
   calculatePlanButton.addEventListener("click", () => {
@@ -1079,16 +1352,16 @@
   });
 
   stockInput.addEventListener("input", () => {
-    cancelInFlightExactSolve();
+    cancelInFlightBackgroundSolves();
     renderStockPreview();
   });
 
   kerfInput.addEventListener("input", () => {
-    cancelInFlightExactSolve();
+    cancelInFlightBackgroundSolves();
   });
 
   unitSelect.addEventListener("change", (event) => {
-    cancelInFlightExactSolve();
+    cancelInFlightBackgroundSolves();
     const nextUnit = event.target.value;
     if (!UNIT_META[nextUnit]) return;
 
@@ -1105,7 +1378,7 @@
   solverModeSelect.addEventListener("change", (event) => {
     const nextMode = event.target.value;
     if (!SOLVER_MODES.has(nextMode)) return;
-    cancelInFlightExactSolve();
+    cancelInFlightBackgroundSolves();
     state.solverMode = nextMode;
     saveLocalState();
     stockStatus.textContent = `Solver mode set to ${nextMode}.`;
@@ -1117,12 +1390,11 @@
 
   loadLocalState();
   hydrateInputs();
-  hideCorrectionPanel();
   setupRecognition();
   setupServiceWorker();
   updateModeUI();
   updateRecordingUI();
   renderCuts();
   renderResults();
-  applyConfidence(Number.parseFloat(slider.value));
+  applyConfidence(0.62);
 })();

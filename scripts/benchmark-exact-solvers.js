@@ -5,7 +5,7 @@ const path = require("node:path");
 const { performance } = require("node:perf_hooks");
 const assert = require("node:assert/strict");
 
-const { evaluatePackingExact } = require("./engine.js");
+const { evaluatePacking, evaluatePackingExact } = require("./engine.js");
 
 const WASM_PATH = path.resolve(__dirname, "wasm", "cut_buddy_exact_wasm.wasm");
 const EPSILON = 1e-6;
@@ -112,6 +112,8 @@ const run = async () => {
   );
 
   for (const testCase of cases) {
+    const heuristicTotalTimings = [];
+    const heuristicKernelTimings = [];
     const jsTotalTimings = [];
     const wasmTotalTimings = [];
     const jsKernelTimings = [];
@@ -128,6 +130,12 @@ const run = async () => {
         kerf,
         timeBudgetMs: budget
       };
+
+      const heuristicStart = performance.now();
+      const heuristicResult = evaluatePacking(payload.cuts, payload.stockLengths, payload.kerf);
+      const heuristicElapsed = performance.now() - heuristicStart;
+      heuristicTotalTimings.push(heuristicElapsed);
+      heuristicKernelTimings.push(heuristicElapsed);
 
       const jsStart = performance.now();
       const jsResult = evaluatePackingExact(payload.cuts, payload.stockLengths, payload.kerf, {
@@ -148,13 +156,15 @@ const run = async () => {
       if (wasmResult.termination === "timed_out") wasmTimedOut += 1;
 
       if (jsResult.termination === "completed" && wasmResult.termination === "completed") {
+        const heuristicObjective = objective(heuristicResult, kerf);
         const jsObjective = objective(jsResult, kerf);
         const wasmObjective = objective(wasmResult, kerf);
+        assert.ok(jsObjective <= heuristicObjective + EPSILON, "JS exact objective regressed against heuristic on completed run");
         assert.ok(wasmObjective <= jsObjective + EPSILON, "WASM objective regressed against JS on completed run");
       }
     }
 
-    const summarize = (name, totalTimings, kernelTimings, completed, timedOut) => {
+    const summarize = (name, totalTimings, kernelTimings, completed = "-", timedOut = "-") => {
       console.log(
         [
           testCase.name,
@@ -173,6 +183,7 @@ const run = async () => {
       );
     };
 
+    summarize("heuristic", heuristicTotalTimings, heuristicKernelTimings);
     summarize("js", jsTotalTimings, jsKernelTimings, jsCompleted, jsTimedOut);
     summarize("wasm", wasmTotalTimings, wasmKernelTimings, wasmCompleted, wasmTimedOut);
   }

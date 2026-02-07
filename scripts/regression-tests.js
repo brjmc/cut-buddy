@@ -1,5 +1,5 @@
 const assert = require("node:assert/strict");
-const { evaluatePacking, evaluatePackingExact, parseMeasurement, parseStockInput } = require("./engine.js");
+const { evaluatePacking, evaluatePackingApprox, evaluatePackingExact, parseMeasurement, parseStockInput } = require("./engine.js");
 
 const approxEqual = (actual, expected, epsilon = 1e-9) => {
   assert.ok(Math.abs(actual - expected) <= epsilon, `Expected ${actual} ~= ${expected}`);
@@ -72,8 +72,65 @@ const testExactOptimizer = () => {
   assert.ok(["timed_out", "completed"].includes(timeoutCase.termination));
 };
 
+const testApproxOptimizer = () => {
+  const cuts = [84, 84, 78, 72, 66, 66, 60, 60, 54, 48, 48, 42, 36, 30, 24, 24, 18, 12];
+  const stocks = [96, 120, 144];
+  const kerf = 0.125;
+
+  const heuristic = evaluatePacking(cuts, stocks, kerf);
+  const improvements = [];
+  let previousObjective = heuristic.totalStockLength + kerf * heuristic.binCount;
+
+  const approx = evaluatePackingApprox(cuts, stocks, kerf, {
+    timeBudgetMs: 1200,
+    seed: 20260207,
+    deterministic: true,
+    onImprovement: ({ candidate, objective }) => {
+      const candidateObjective = candidate.totalStockLength + kerf * candidate.binCount;
+      assert.ok(candidateObjective <= previousObjective + 1e-9, "Improvement callback must be monotonic.");
+      assert.ok(Math.abs(candidateObjective - objective) <= 1e-6, "Improvement payload objective should match candidate.");
+      previousObjective = candidateObjective;
+      improvements.push(candidateObjective);
+    }
+  });
+
+  const heuristicObjective = heuristic.totalStockLength + kerf * heuristic.binCount;
+  const approxObjective = approx.totalStockLength + kerf * approx.binCount;
+  assert.ok(approxObjective <= heuristicObjective + 1e-9, "Approximate objective must never regress heuristic.");
+  if (improvements.length) {
+    assert.ok(improvements[improvements.length - 1] <= heuristicObjective + 1e-9);
+  }
+
+  const sameSeedA = evaluatePackingApprox(cuts, stocks, kerf, {
+    timeBudgetMs: 900,
+    seed: 4242,
+    deterministic: true
+  });
+  const sameSeedB = evaluatePackingApprox(cuts, stocks, kerf, {
+    timeBudgetMs: 900,
+    seed: 4242,
+    deterministic: true
+  });
+  assert.equal(sameSeedA.totalStockLength, sameSeedB.totalStockLength, "Seeded deterministic runs should match stock length.");
+  assert.equal(sameSeedA.binCount, sameSeedB.binCount, "Seeded deterministic runs should match bin count.");
+  assert.equal(sameSeedA.totalWaste, sameSeedB.totalWaste, "Seeded deterministic runs should match waste.");
+
+  let abortChecks = 0;
+  const cancelled = evaluatePackingApprox(cuts, stocks, kerf, {
+    timeBudgetMs: 5000,
+    seed: 9999,
+    deterministic: true,
+    shouldAbort: () => {
+      abortChecks += 1;
+      return abortChecks > 3;
+    }
+  });
+  assert.equal(cancelled.termination, "cancelled", "Approx solver should return cancelled when abort is requested.");
+};
+
 testParser();
 testOptimizer();
 testExactOptimizer();
+testApproxOptimizer();
 
 console.log("Regression tests passed.");

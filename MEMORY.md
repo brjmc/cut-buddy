@@ -3,46 +3,46 @@
 ## Session Summary - 2026-02-07
 
 ### Major Deliverables
-- Hardened measurement parsing with safe-fail behavior for unsupported denominator-word fraction phrases.
-- Extracted shared parser/optimizer core into `scripts/engine.js`.
-- Added regression coverage via `scripts/regression-tests.js`.
-- Added workflow wiring precheck via `scripts/workflow-precheck.js`.
-- Added mobile validation tracking doc: `MOBILE_VALIDATION_REPORT.md`.
-- Implemented replacement manual correction interaction in record mode:
-  - parse failure opens correction panel,
-  - corrected phrase can be applied inline without leaving recording flow.
-- Completed UI Sketch implementation plan steps 1-7 in `plan.md`:
-  - plan DOM restructured to top config/cuts + lower results section,
-  - controls simplified and de-emphasized for sketch parity,
-  - recording view reprioritized around latest accepted cut + grouped counts,
-  - record exit now auto-scrolls to results with reduced-motion fallback,
-  - responsive spacing/tap targets tuned,
-  - focus behavior added for record enter/exit.
-- Manual validation was completed by user and reflected as complete in plan tracking.
-- Added exact optimization stack:
-  - hybrid solver modes (`heuristic`, `exact`, `auto`) with guardrails,
-  - exact branch-and-bound solver in `scripts/engine.js`,
-  - Rust WASM solver crate at `native/cut_buddy_exact_wasm`,
-  - worker integration with WASM primary backend and JS fallback.
-- Added validation tooling for exact path:
-  - browser smoke page `wasm-smoke.html` requiring worker backend `wasm`,
-  - benchmark suite `scripts/benchmark-exact-solvers.js` with `total_*` and `kernel_*` timing splits.
+- Parser hardened for unsupported denominator-word fractions (safe-fail behavior).
+- Shared engine core (`scripts/engine.js`) now powers browser app, workers, and Node tooling.
+- Exact optimization path is active with:
+  - solver modes (`heuristic`, `exact`, `auto`),
+  - exact worker (`scripts/exact-solver-worker.js`) with WASM-first backend and JS fallback,
+  - guardrails (`maxCutsForExact=16`, `exactTimeBudgetMs=20000`).
+- Added anytime approximate optimization path:
+  - worker (`scripts/approx-improver-worker.js`) with `start/cancel/progress/improvement/done/error` protocol,
+  - engine support for multi-start randomized search + local search + bounded LNS,
+  - strict objective-only replacement semantics and request-id fencing.
+- Added/expanded validation tooling:
+  - regression tests (`scripts/regression-tests.js`) including approximate monotonicity/cancellation/reproducibility checks,
+  - exact benchmark (`scripts/benchmark-exact-solvers.js`),
+  - approximate benchmark (`scripts/benchmark-approx-improver.js`),
+  - quality comparison (`scripts/compare-heuristic-vs-exact.js`),
+  - browser harnesses (`wasm-smoke.html`, `mobile-benchmark.html`).
+- Refined record and cut-list UX:
+  - record summary list is recency-ordered with grouped counts,
+  - manual correction panel removed,
+  - manual cut add input added to the plan card,
+  - cut list is grouped by length with quantity and plan-coverage status (`✓`, `!`, `•`),
+  - cut list rows are selectable and show `+`, `-`, `🗑` controls only when selected.
+- Results/cut status synchronization improved:
+  - cut coverage icons refresh when calculation starts and when exact/approx updates land.
 
 ### Current Product Reality
-- Parser now rejects unsupported formats (for example denominator-word variants like `13/64ths`) instead of producing bogus values.
-- Parse failures provide explicit feedback and preserve stable latest accepted cut display.
-- Record view is immersive and prioritizes capture-centric information hierarchy.
-- Exiting recording returns to plan and jumps user to results context.
-- Core parser/optimizer behavior is testable outside the browser.
-- Exact solver behavior now has deterministic fixtures in both JS and Rust test paths.
+- Parser rejects unsupported formats (for example `13/64ths`) instead of producing bogus numeric output.
+- Record flow is immersive and optimized for rapid voice capture; exiting record auto-scrolls to results.
+- Plan-mode `Cut List` is now the primary correction/edit surface (grouped, selectable, incremental controls).
+- Solver status distinguishes heuristic preview, approximate improvements, and exact completion/fallback.
+- Engine behavior is testable from Node and worker contexts with deterministic seeded runs.
 
 ### Source of Truth Files
 - Plan/status: `plan.md`
 - Validation status and checklist: `MOBILE_VALIDATION_REPORT.md`
 - Parser/optimizer core: `scripts/engine.js`
 - Regression tests: `scripts/regression-tests.js`
-- Workflow guard checks: `scripts/workflow-precheck.js`
+- App runtime orchestration: `scripts/app.js`
 
 ### Follow-up Opportunities
-1. Add a compact `jump to config` affordance when deep in results (already noted in `plan.md`).
-2. Expand parser regression set with more speech-transcript edge cases from field usage.
+1. Complete manual mobile Safari/Chrome runtime validation for exact/approx worker behavior and UI jank checks.
+2. Add an explicit status legend in UI for `✓`, `!`, and `•` cut-list indicators.
+3. Add parser regression cases from real-world voice transcripts collected during field use.
